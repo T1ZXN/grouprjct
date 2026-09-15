@@ -1,0 +1,11 @@
+# Netlify build for the N2 Wheels static export.
+# The site is statically prerendered by export-netlify.ts into dist-netlify/
+# (which is gitignored, so Netlify must build it here).
+[build]
+  command = "bun install && bun run build && bun ./export-netlify.ts"
+  publish = "dist-netlify"
+
+# No Supabase env is required: the site falls back to sample data when
+# SUPABASE_URL / SUPABASE_ANON_KEY are absent, so it deploys regardless.
+# Add those two under Netlify → Site settings → Environment when going live
+# with the real catalogue.
