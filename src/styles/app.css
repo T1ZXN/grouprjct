@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/*
+ * N2 Wheels brand theme.
+ * Near-black backgrounds, white text, single red accent (#e10600),
+ * clean grey secondary. Premium / sporty / automotive / mobile-first.
+ *
+ * Tokens are declared with Tailwind v4 @theme so they generate utilities
+ * like bg-night, bg-carbon, bg-coal, text-steel, bg-race, border-line...
+ */
+@theme {
+  --color-night: #18181c; /* page background (charcoal grey — owner: not black) */
+  --color-carbon: #222228; /* section background (charcoal, one step lighter) */
+  --color-coal: #2a2a31; /* raised cards / panels / inputs */
+  --color-line: #ffffff1f; /* subtle 12% white borders */
+  --color-race: #e10600; /* brand red accent */
+  --color-race-bright: #ff241a; /* red hover state */
+  --color-race-deep: #9e0500; /* pressed / darker red */
+  --color-steel: #a5adb8; /* secondary text (grey) */
+  --color-steel-dim: #7d8590; /* tertiary text */
+
+  /* System font stack — deliberately no heavy webfont loads (page speed). */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: dark; /* dark form controls / scrollbars */
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-night text-white antialiased;
+  }
+  ::selection {
+    @apply bg-race text-white;
+  }
+}
+
+@layer components {
+  .container-x {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-5 py-3 text-sm font-semibold tracking-wide transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-race;
+  }
+  .btn-red {
+    @apply bg-race text-white hover:bg-race-bright;
+  }
+  .btn-outline {
+    @apply border border-white/25 text-white hover:border-white/60 hover:bg-white/5;
+  }
+  .btn-ghost {
+    @apply text-steel hover:text-white;
+  }
+  .section-title {
+    @apply text-2xl font-bold tracking-tight text-white sm:text-3xl;
+  }
+  .section-sub {
+    @apply mt-3 max-w-2xl text-sm leading-relaxed text-steel sm:text-base;
+  }
+  .sample-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-race/40 bg-race/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-race-bright;
+  }
+  .field-label {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-steel;
+  }
+  .field-input {
+    @apply w-full rounded-md border border-white/10 bg-coal px-3.5 py-3 text-sm text-white transition-colors placeholder:text-steel-dim focus:border-race focus:outline-none;
+  }
+  .nav-link {
+    @apply rounded-md px-2.5 py-2 text-[13px] font-medium text-steel transition-colors hover:text-white;
+  }
+  .nav-link-active {
+    @apply text-white;
+  }
+  .link-muted {
+    @apply text-steel transition-colors hover:text-white;
+  }
+}
