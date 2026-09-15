@@ -4,9 +4,10 @@
  *
  * Purposely the ONLY place that turns a product's sample fitment data into a
  * verdict, so wheels and packages can never drift apart in honesty. It renders
- * Make / Model / Year selects (reusing the demo fleet from vehicleLookup.ts —
- * the same source the homepage and /fitment searches use) and, on "Check
- * fitment", produces one of three honest verdicts:
+ * Make / Model / Year selects (reusing the demo fleet from the vehicle-lookup
+ * provider layer — src/lib/reglookup.ts, the same source the homepage and
+ * /fitment searches use) and, on "Check fitment", produces one of three honest
+ * verdicts against the product's OWN sample fitment records:
  *
  *   - compatible  — the make+model matches a VehicleFitment record 👉 GREEN,
  *                   always labelled "based on our sample fitment data".
@@ -15,15 +16,28 @@
  *   - no-data     — the product has NO sample fitment data yet 👉 NEUTRAL,
  *                   same "we'll verify…" promise.
  *
- * No verdict ever claims universal fitment or guarantees anything. A link to
- * /fitment offers the registration-plate / full-details path for the future
- * UK reg-API integration (again demo until then).
+ * The vehicle itself is identified THROUGH the provider layer
+ * (`getFitments`), so the same seam that will carry a live UK reg / fits API
+ * later already feeds this component: with no API key the layer returns
+ * clearly-labelled demo fitment data; with a key it returns live results in
+ * the same shape. No verdict ever claims universal fitment or guarantees
+ * anything. A link to /fitment offers the registration-plate path for the
+ * future UK reg-API integration (again demo until then).
  */
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { VehicleFitment } from "~/data/products";
-import { DEMO_MAKES, DEMO_YEARS, modelsForMake } from "~/lib/vehicleLookup";
+import {
+  DEMO_FITMENTS_NOTICE,
+  DEMO_MAKES,
+  DEMO_YEARS,
+  getFitments,
+  getProviderLabel,
+  isLiveMode,
+  modelsForMake,
+} from "~/lib/reglookup";
+import type { FitmentOption } from "~/lib/reglookup";
 
 /** The three honest verdicts a check can produce. */
 export type FitmentVerdict =
@@ -92,7 +106,12 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
   const [year, setYear] = useState("");
   const [verdict, setVerdict] = useState<FitmentVerdict | null>(null);
   const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  /** Fitting options for the chosen vehicle, from the provider layer. */
+  const [vehicleFits, setVehicleFits] = useState<FitmentOption[] | null>(null);
   const models = make ? modelsForMake(make) : [];
+  const live = isLiveMode();
+  const providerLabel = getProviderLabel();
 
   const resetSelection = (nextMake: string) => {
     setMake(nextMake);
@@ -100,13 +119,26 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
     setYear("");
     setVerdict(null);
     setChecked(false);
+    setVehicleFits(null);
   };
 
-  const handleCheck = (e: FormEvent) => {
+  const handleCheck = async (e: FormEvent) => {
     e.preventDefault();
     if (!make || !model) return; // submit is disabled until both are chosen
-    setVerdict(checkVehicleFitment(fitments, make, model, year ? Number(year) : undefined));
+    setBusy(true);
+    const yearNum = year ? Number(year) : undefined;
+    setVerdict(checkVehicleFitment(fitments, make, model, yearNum));
     setChecked(true);
+    setVehicleFits(null);
+    try {
+      const fits = await getFitments(make, model, yearNum);
+      setVehicleFits(fits.options);
+    } catch {
+      // Provider hiccup — the verdict still stands; options are a bonus.
+      setVehicleFits(null);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const list = fitments ?? [];
@@ -120,7 +152,7 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
       </div>
       <div className="p-5">
         <p className="text-sm leading-relaxed text-steel">
-          Choose your car and we'll tell you whether {productName} is listed in our sample
+          Choose your car and we&apos;ll tell you whether {productName} is listed in our sample
           fitment data — before we ever confirm an order.
         </p>
         {makes && makes.length > 0 && (
@@ -159,6 +191,7 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
                 setModel(e.target.value);
                 setVerdict(null);
                 setChecked(false);
+                setVehicleFits(null);
               }}
               className="field-input"
               disabled={!make}
@@ -182,6 +215,7 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
                 setYear(e.target.value);
                 setVerdict(null);
                 setChecked(false);
+                setVehicleFits(null);
               }}
               className="field-input"
             >
@@ -194,8 +228,12 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
             </select>
           </div>
           <div className="sm:col-span-3">
-            <button type="submit" className="btn btn-red w-full sm:w-auto" disabled={!make || !model}>
-              Check fitment
+            <button
+              type="submit"
+              className="btn btn-red w-full sm:w-auto"
+              disabled={!make || !model || busy}
+            >
+              {busy ? "Checking…" : "Check fitment"}
             </button>
             <button
               type="button"
@@ -212,8 +250,28 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
           </div>
         </form>
 
-        {verdict && checked && (
-          <VerdictCard verdict={verdict} />
+        {verdict && checked && <VerdictCard verdict={verdict} />}
+
+        {checked && vehicleFits && vehicleFits.length > 0 && (
+          <div className="mt-4 rounded-lg border border-white/10 bg-coal/50 p-4">
+            <p className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-steel">
+              <span className="sample-chip">Sample fitment data</span>
+              Vehicle fitting options {live ? "" : "(demo)"}
+            </p>
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {vehicleFits.slice(0, 6).map((o) => (
+                <li
+                  key={`${o.diameter}-${o.width}-${o.pcd}-${o.offset}`}
+                  className="rounded-md border border-white/10 bg-coal px-2.5 py-1.5 text-xs text-steel"
+                >
+                  {o.diameter}" × {o.width} · {o.pcd} · {o.offset}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-xs text-steel-dim">
+              {DEMO_FITMENTS_NOTICE} Provided by {providerLabel}.
+            </p>
+          </div>
         )}
 
         {list.length > 0 && (
@@ -236,7 +294,7 @@ export function FitmentChecker({ fitments, makes, productName, children }: Fitme
         <p className="mt-5 text-xs leading-relaxed text-steel-dim">
           Fitment shown is sample data. We always check geometry and compatibility against your
           exact vehicle before confirming any order — reducing the chance of incorrect orders and
-          returns.
+          returns. Vehicle data source: {providerLabel} ({live ? "live lookup" : "demo mode"}).
         </p>
         {children}
       </div>
