@@ -35,6 +35,8 @@ import {
   savePricingSettings,
   saveProductRow,
 } from "~/lib/store";
+import { importToCatalogue, importWroteAnything } from "~/lib/importPersistence";
+import type { ImportCatalogueResult } from "~/lib/importPersistence";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -394,6 +396,9 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
     mapped: MappedProduct[];
     sync: StockSyncReport;
   } | null>(null);
+  // Phase 4 — import-to-catalogue persistence (signed-in only).
+  const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState<ImportCatalogueResult | null>(null);
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setTier = (i: number, patch: Partial<{ minQty: number; priceGBP: string }>) =>
@@ -550,6 +555,42 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
       demoAllProducts.map((p) => ({ supplierId: skuOf(p), stockStatus: p.stockStatus })),
     );
     setImportResult({ summary, mapped, sync });
+    setImportReport(null);
+  };
+
+  /**
+   * Phase 4 — write the CURRENT preview's mapped rows into public.products
+   * through the signed-in session. Preview and import share the exact same
+   * mapped rows (mapFeedRowToProduct / parseSupplierExcel), so what you see
+   * in the preview table is precisely what gets upserted. Batched writes,
+   * honest per-row report, and nothing is written when the session is missing
+   * or the schema hasn't been created (see importPersistence.ts).
+   */
+  const persistImport = async () => {
+    if (!importResult || importResult.mapped.length === 0) {
+      setMessage({
+        ok: false,
+        text: "Run “Process demo import” first so there is a parsed preview to write.",
+      });
+      return;
+    }
+    setImporting(true);
+    setImportReport(null);
+    const res = await importToCatalogue(importResult.mapped);
+    setImporting(false);
+    setImportReport(res);
+    if (!importWroteAnything(res) && res.failed === 0) {
+      // Nothing was written — blocked honestly (not configured / not signed in /
+      // schema missing) or every row was skipped. Never a success message.
+      setMessage({ ok: false, text: res.error ?? "Import finished but nothing was written." });
+    } else {
+      setMessage({
+        ok: res.ok,
+        text: res.error
+          ? `Import finished: ${res.created} created, ${res.updated} updated, ${res.failed} failed, ${res.skipped} skipped. ${res.error}`
+          : `Import finished: ${res.created} created, ${res.updated} updated, ${res.skipped} skipped.`,
+      });
+    }
   };
 
   const tabBtn = (id: Tab, label: string) => (
@@ -587,7 +628,8 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
             Admin tooling — demo import, no live feed connected. Product rows, stock and supplier
             numbers remain SAMPLE data. When you are signed in, pricing settings and per-row product
             edits Save to your Supabase project (public.pricing_settings / public.products); the
-            Import tab is a preview only and writes nothing.
+            Import tab can preview a supplier feed, then write the mapped rows into public.products
+            in one batched upsert (“Import to catalogue”).
           </div>
         </div>
       </div>
@@ -868,8 +910,10 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                 Parse a Forzza-shaped supplier feed (CSV, XML, or Excel .xls / .xlsx — the
                 first worksheet is read) and map it onto the product model via the pricing
                 engine — the exact pipeline a real feed will use. The sample below is embedded
-                in the codebase; upload a file or paste a snippet. No network calls happen
-                anywhere in this tooling.
+                in the codebase; upload a file or paste a snippet. Parsing is fully offline
+                (no feed URLs, no network calls); the only write is the explicit
+                “Import to catalogue” button, upserting the mapped rows through your signed-in
+                Supabase session.
               </p>
               <input
                 type="file"
@@ -943,9 +987,32 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
               <p className="mt-2 text-xs text-steel-dim">
                 Parsing as: <span className="font-mono text-steel">{importFileName || "feed.csv"}</span>
               </p>
-              <button type="button" className="btn btn-red mt-4" onClick={processImport}>
-                Process demo import
-              </button>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button type="button" className="btn btn-red" onClick={processImport}>
+                  Process demo import
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => void persistImport()}
+                  disabled={importing || !importResult || importResult.mapped.length === 0}
+                  title={
+                    importResult && importResult.mapped.length > 0
+                      ? "Upsert the mapped preview rows into public.products (signed-in session, batched)."
+                      : "Run the preview first so there are mapped rows to write."
+                  }
+                >
+                  {importing
+                    ? "Importing…"
+                    : `Import ${importResult?.mapped.length ?? 0} rows to catalogue`}
+                </button>
+              </div>
+              {importing && (
+                <p className="mt-3 rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs text-sky-300">
+                  Writing the mapped rows into public.products in batches of up to 40 — this can
+                  take a moment for large feeds.
+                </p>
+              )}
             </section>
 
             <section className="rounded-lg border border-line bg-carbon p-6">
@@ -1015,11 +1082,70 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                   </div>
                   <p className="text-xs leading-relaxed text-steel-dim">
                     Rows above are mapped to the site’s product model (Wheel / Tyre / Package /
-                    Accessory) with retail prices computed by the pricing engine — a preview only;
-                    nothing is written into the live catalogue. The stock column shows the
+                    Accessory) with retail prices computed by the pricing engine — a preview of
+                    exactly what “Import to catalogue” would write. Nothing is written until you
+                    press that button. The stock column shows the
                     <span className="text-steel"> syncStockFromFeed </span>
                     mapping (in_stock → In Stock, out_of_stock → Out of stock, unknown → Contact us).
                   </p>
+
+                  {importReport && (
+                    <div className="mt-6 rounded-md border border-line bg-coal/60 p-4">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                        Import to catalogue — result
+                      </h3>
+                      <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                        <span className="rounded-md border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-semibold text-emerald-300">
+                          {importReport.created} created
+                        </span>
+                        <span className="rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 font-semibold text-sky-300">
+                          {importReport.updated} updated
+                        </span>
+                        <span className={`rounded-md border px-3 py-1.5 font-semibold ${importReport.failed ? "border-race/40 bg-race/10 text-race-bright" : "border-line bg-white/5 text-steel"}`}>
+                          {importReport.failed} failed
+                        </span>
+                        <span className={`rounded-md border px-3 py-1.5 font-semibold ${importReport.skipped ? "border-amber-300/40 bg-amber-300/10 text-amber-200" : "border-line bg-white/5 text-steel"}`}>
+                          {importReport.skipped} skipped
+                        </span>
+                      </div>
+                      {importReport.error && (
+                        <p className="mt-3 rounded-md border border-race/40 bg-race/10 px-3 py-2 text-xs leading-relaxed text-race-bright">
+                          {importReport.error}
+                        </p>
+                      )}
+                      {importWroteAnything(importReport) && (
+                        <p className="mt-3 text-xs text-emerald-300">
+                          Catalogue updated — {importReport.created} new row
+                          {importReport.created === 1 ? "" : "s"} inserted, {importReport.updated} existing
+                          row{importReport.updated === 1 ? "" : "s"} updated (upserted on id / slug).
+                        </p>
+                      )}
+                      {importReport.failures.length > 0 && (
+                        <div className="mt-3">
+                          <h4 className="text-[11px] font-bold uppercase tracking-wider text-race-bright">Failed rows</h4>
+                          <ul className="mt-2 space-y-1">
+                            {importReport.failures.map((f, i) => (
+                              <li key={i} className="rounded-md border border-race/30 bg-race/5 px-3 py-2 text-xs text-steel">
+                                <span className="font-mono text-race-bright">{f.id}</span> — {f.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {importReport.skips.length > 0 && (
+                        <div className="mt-3">
+                          <h4 className="text-[11px] font-bold uppercase tracking-wider text-amber-200">Skipped rows</h4>
+                          <ul className="mt-2 space-y-1">
+                            {importReport.skips.map((s, i) => (
+                              <li key={i} className="rounded-md border border-amber-300/30 bg-amber-300/5 px-3 py-2 text-xs text-steel">
+                                <span className="font-mono text-amber-200">{s.id}</span> — {s.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </section>
