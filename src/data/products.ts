@@ -12,6 +12,9 @@
  * settings — never hard-coded here.
  */
 import { recalculateAllPrices, retailPriceIncVat, round2 } from "~/lib/pricing";
+// Model strings for the sample fitment records come from the SAME fleet list
+// that populates the make/model dropdowns, so the two can never drift apart.
+import { fleetFitments } from "~/data/demo-fleet";
 
 export const DEMO_NOTICE =
   "Sample data — demo products only. No live stock or availability is claimed.";
@@ -188,10 +191,43 @@ export const demoWheels: Wheel[] = [
     image: "/images/wheel-forza.jpg",
     description: "Five-spoke gloss black lightweight alloy with a deep concave face.",
     vehicleCompatibility: ["Audi", "BMW", "Mercedes-Benz", "Volkswagen"],
-    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee.
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. These
+    // records are built from the shared demo fleet (src/data/demo-fleet.ts), so
+    // every model string below is one the make/model selects can produce.
+    // Make/model level only — the demo dataset does not model per-generation
+    // geometry, and every order is checked against the exact vehicle.
     vehicleFitments: [
       { make: "BMW", model: "3 Series", generation: "F30", yearsStart: 2012, yearsEnd: 2018 },
       { make: "Volkswagen", model: "Golf", generation: "MK7", yearsStart: 2013, yearsEnd: 2020 },
+      ...fleetFitments("Audi", ["A3", "A4", "A5", "A6", "S3", "S4", "S5", "Q3", "Q5"]),
+      ...fleetFitments("BMW", [
+        "1 Series",
+        "2 Series",
+        "4 Series",
+        "5 Series",
+        "X1",
+        "X2",
+        "X3",
+        "X4",
+        "X5",
+        "M3",
+        "M4",
+      ]),
+      ...fleetFitments("Mercedes-Benz", [
+        "A-Class",
+        "A180",
+        "A200",
+        "A45",
+        "C-Class",
+        "C180",
+        "C200",
+        "C63",
+        "E200",
+        "GLA",
+        "GLC",
+        "GLE",
+      ]),
+      ...fleetFitments("Volkswagen", ["Golf R", "Passat", "Tiguan", "T-Roc", "Arteon"]),
     ],
   },
   {
@@ -209,11 +245,46 @@ export const demoWheels: Wheel[] = [
     includedBolts: "20x conical bolts included",
     image: "/images/wheel-vortex.jpg",
     description: "Split-spoke satin gunmetal wheel with an aggressive motorsport profile.",
-    vehicleCompatibility: ["Nissan", "Toyota", "Honda"],
-    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee.
+    vehicleCompatibility: ["Audi", "BMW", "Mercedes-Benz", "Volkswagen", "Nissan", "Toyota", "Honda"],
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. Built
+    // from the shared demo fleet (src/data/demo-fleet.ts) so every model string
+    // is one the make/model selects can produce. This wheel is our most popular
+    // fitment search hit, so it carries the widest sample coverage: the German
+    // premium makes the owner asked for, plus the Nissan / Toyota models that
+    // already had records. Geometry is verified per vehicle before any order.
     vehicleFitments: [
       { make: "Nissan", model: "Qashqai", generation: "J11", yearsStart: 2014, yearsEnd: 2021 },
       { make: "Toyota", model: "Corolla", generation: "E210", yearsStart: 2019, yearsEnd: 2022 },
+      ...fleetFitments("Audi", ["A3", "A4", "A5", "S3", "S4", "Q3", "Q5"]),
+      ...fleetFitments("BMW", [
+        "1 Series",
+        "2 Series",
+        "3 Series",
+        "4 Series",
+        "5 Series",
+        "X1",
+        "X2",
+        "X3",
+        "X4",
+        "X5",
+        "M3",
+        "M4",
+      ]),
+      ...fleetFitments("Mercedes-Benz", [
+        "A-Class",
+        "A180",
+        "A200",
+        "A45",
+        "C-Class",
+        "C180",
+        "C200",
+        "C63",
+        "GLA",
+        "GLC",
+      ]),
+      ...fleetFitments("Volkswagen", ["Golf", "Golf R", "Passat", "Tiguan", "T-Roc", "Arteon"]),
+      ...fleetFitments("Nissan", ["Micra", "Juke", "X-Trail", "Leaf", "Ariya"]),
+      ...fleetFitments("Toyota", ["RAV4", "C-HR", "Camry", "Supra"]),
     ],
   },
   {
@@ -232,6 +303,12 @@ export const demoWheels: Wheel[] = [
     image: "/images/wheel-apex.jpg",
     description: "Twin-spoke matte bronze wheel with a refined, understated look.",
     vehicleCompatibility: ["Subaru", "Volkswagen", "Seat"],
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. Only a
+    // model whose geometry genuinely matches this 5x100 wheel is listed
+    // (5x100 is the older VW/Audi platform pattern, not the current one).
+    vehicleFitments: [
+      { make: "Volkswagen", model: "Golf", generation: "MK4", yearsStart: 1998, yearsEnd: 2003 },
+    ],
   },
   {
     id: "w-drifter-d5-17",
@@ -249,6 +326,11 @@ export const demoWheels: Wheel[] = [
     image: "/images/wheel-drifter.jpg",
     description: "Machined silver twin-spoke classic with dark recessed pockets.",
     vehicleCompatibility: ["Ford", "Volvo", "Vauxhall"],
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. 5x108 is
+    // Ford's pattern on this era of car; only genuinely matching models listed.
+    vehicleFitments: [
+      { make: "Ford", model: "Focus", generation: "MK3", yearsStart: 2011, yearsEnd: 2018 },
+    ],
   },
   {
     id: "w-turbo-t6-19",
@@ -266,6 +348,14 @@ export const demoWheels: Wheel[] = [
     image: "/images/wheel-vortex.jpg", // illustrative
     description: "Six-spoke satin graphite wheel built for the daily driver.",
     vehicleCompatibility: ["Audi", "Mercedes-Benz", "Volkswagen"],
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. 5x112 is
+    // the shared Audi / Mercedes-Benz / Volkswagen pattern, and the make-level
+    // list above matches the makes below.
+    vehicleFitments: [
+      ...fleetFitments("Audi", ["A4", "A5", "A6", "Q3", "Q5"]),
+      ...fleetFitments("Mercedes-Benz", ["A-Class", "C-Class", "E200", "GLC"]),
+      ...fleetFitments("Volkswagen", ["Golf", "Passat", "Tiguan", "Arteon"]),
+    ],
   },
   {
     id: "w-grip-g9-16",
@@ -283,10 +373,12 @@ export const demoWheels: Wheel[] = [
     image: "/images/category-wheels.jpg", // illustrative
     description: "Smart five-spoke gloss black wheel for smaller city cars.",
     vehicleCompatibility: ["Ford", "Toyota", "Vauxhall"],
-    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee.
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. 4x100 is
+    // a small-car pattern, so only genuinely matching small models are listed.
     vehicleFitments: [
       { make: "Ford", model: "Fiesta", generation: "MK7", yearsStart: 2008, yearsEnd: 2017 },
       { make: "Toyota", model: "Yaris", generation: "XP130", yearsStart: 2011, yearsEnd: 2020 },
+      { make: "Toyota", model: "Aygo", generation: "AB10", yearsStart: 2014, yearsEnd: 2022 },
       { make: "Vauxhall", model: "Corsa", generation: "D", yearsStart: 2006, yearsEnd: 2014 },
     ],
   },
@@ -365,10 +457,16 @@ export const demoPackages: WheelPackage[] = [
     ],
     wheelSpec: { diameter: 18, width: "8.5J", pcd: "5x112", offset: "ET45" },
     tyreSpec: { brand: "Strada", model: "SP-01", width: 225, aspect: 45, rimDiameter: 18 },
-    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee.
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. This pack
+    // uses the same 5x112 wheel as the Forza R1, so it carries the same sample
+    // coverage of the German premium makes (see src/data/demo-fleet.ts).
     vehicleFitments: [
       { make: "BMW", model: "3 Series", generation: "F30", yearsStart: 2012, yearsEnd: 2018 },
       { make: "Volkswagen", model: "Golf", generation: "MK7", yearsStart: 2013, yearsEnd: 2020 },
+      ...fleetFitments("Audi", ["A3", "A4", "A5", "S3", "Q5"]),
+      ...fleetFitments("BMW", ["1 Series", "2 Series", "4 Series", "5 Series", "X1", "X3", "M4"]),
+      ...fleetFitments("Mercedes-Benz", ["A-Class", "A180", "C-Class", "GLA", "GLC"]),
+      ...fleetFitments("Volkswagen", ["Golf R", "Passat", "Tiguan", "T-Roc"]),
     ],
     supplierPriceEur: 624,
     retailPriceIncVat: retail(624),

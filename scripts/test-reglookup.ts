@@ -41,6 +41,10 @@ import {
 } from "../src/lib/reglookup-ukvrm";
 import { createFitsProvider, mapFitmentOptions } from "../src/lib/reglookup-fits";
 import { createLiveProvider, LIVE_PROVIDER_ID } from "../src/lib/reglookup-live";
+// Demo fleet ↔ product fitment records (the dropdown → verdict flow).
+import { DEMO_FLEET, demoProvider, modelsForMake } from "../src/lib/reglookup-demo";
+import { demoPackages, demoWheels } from "../src/data/products";
+import { checkVehicleFitment } from "../src/components/FitmentChecker";
 
 let pass = 0;
 let fail = 0;
@@ -467,6 +471,148 @@ const netlifyEntry = await proxyMod.handler(okEvent);
 const netlifyBody = JSON.parse(netlifyEntry.body) as Record<string, unknown>;
 check("Netlify entry point (committed template, no key) honestly reports 503 not-configured JSON", netlifyEntry.statusCode === 503 && netlifyBody.n2proxy === 1 && netlifyBody.proxyError === "not_configured", netlifyEntry.body.slice(0, 120));
 
+// ── DEMO FLEET ↔ PRODUCT FITMENT RECORDS (dropdown → verdict, end to end) ───
+// The dropdown options (DEMO_FLEET, src/data/demo-fleet.ts) and the per-product
+// sample fitment records (src/data/products.ts) must agree
+// character-for-character — the verdict looks the chosen make+model up by string
+// equality, so any drift silently loses a verdict. These checks round-trip real
+// selections through the SAME `checkVehicleFitment` the UI uses, and prove that
+// a model which is not listed still gets the honest non-match.
+console.log("--- demo fleet / fitment records ---");
+const fleetMakes = Object.keys(DEMO_FLEET);
+/** The owner's brief: a full, believable UK lineup per make. */
+const EXPECTED_FLEET_COUNTS: Record<string, number> = {
+  Audi: 23,
+  BMW: 20,
+  "Mercedes-Benz": 16,
+  Volkswagen: 10,
+  Nissan: 8,
+  Toyota: 8,
+  Ford: 8,
+  Kia: 6,
+  MG: 5,
+  Vauxhall: 6,
+  BYD: 5,
+  Changan: 4,
+  Chery: 3,
+};
+const actualCounts = Object.fromEntries(fleetMakes.map((m) => [m, modelsForMake(m).length]));
+const fleetTotal = fleetMakes.reduce((n, m) => n + modelsForMake(m).length, 0);
+check(
+  "fleet covers every briefed make (and only those)",
+  fleetMakes.length === Object.keys(EXPECTED_FLEET_COUNTS).length &&
+    Object.keys(EXPECTED_FLEET_COUNTS).every((m) => fleetMakes.includes(m)),
+  fleetMakes.join(", "),
+);
+check(
+  "every make offers exactly the briefed number of models",
+  Object.entries(EXPECTED_FLEET_COUNTS).every(([m, n]) => modelsForMake(m).length === n),
+  JSON.stringify(actualCounts),
+);
+check("122 models across the fleet", fleetTotal === 122, String(fleetTotal));
+check(
+  "no duplicate or blank model strings in any make",
+  fleetMakes.every((m) => {
+    const list = modelsForMake(m);
+    return list.every((s) => s.trim() !== "") && new Set(list).size === list.length;
+  }),
+);
+/** A sample of the owner-listed models, checked string-for-string. */
+const MUST_HAVE: Record<string, string[]> = {
+  Audi: ["A3", "A4", "A5", "S3", "RS6", "Q5", "Q8"],
+  BMW: ["1 Series", "3 Series", "M4", "X5", "X7"],
+  "Mercedes-Benz": ["A180", "A200", "A45", "C63", "GLC", "EQB"],
+  Volkswagen: ["Golf", "Golf R", "ID.3", "T-Roc"],
+  Nissan: ["Qashqai", "Ariya", "Skyline"],
+  Toyota: ["RAV4", "C-HR", "Land Cruiser"],
+  Ford: ["Puma", "Ranger", "Transit"],
+  Kia: ["EV6", "Sorento"],
+  MG: ["MG3", "MG5"],
+  Vauxhall: ["Insignia", "Grandland"],
+  BYD: ["Han", "Tang"],
+  Changan: ["UNI-V", "UNI-K"],
+  Chery: ["Tiggo 7", "Tiggo 8"],
+};
+const missingBriefed = Object.entries(MUST_HAVE).flatMap(([m, list]) =>
+  list.filter((x) => !modelsForMake(m).includes(x)).map((x) => `${m} ${x}`),
+);
+check("every briefed model is offered, string-for-string", missingBriefed.length === 0, missingBriefed.join(", "));
+check(
+  "the pre-existing model strings are unchanged (existing records keep their verdict)",
+  ["A3", "A4", "Q5"].every((m) => modelsForMake("Audi").includes(m)) &&
+    modelsForMake("BMW").includes("3 Series") &&
+    modelsForMake("Mercedes-Benz").includes("A-Class") &&
+    modelsForMake("Volkswagen").includes("Golf") &&
+    modelsForMake("Nissan").includes("Qashqai"),
+);
+// Records ↔ fleet: every record must be selectable in the dropdown.
+const allFitmentProducts = [...demoWheels, ...demoPackages];
+const withRecords = allFitmentProducts.filter((p) => (p.vehicleFitments ?? []).length > 0);
+const orphanRecords = allFitmentProducts.flatMap((p) =>
+  (p.vehicleFitments ?? [])
+    .filter((f) => !modelsForMake(f.make).includes(f.model))
+    .map((f) => `${p.id}:${f.make} ${f.model}`),
+);
+check("no fitment record drifts from the dropdown (make+model always selectable)", orphanRecords.length === 0, orphanRecords.join(", "));
+// The verdict round-trips — this is exactly what the customer sees.
+const wheelById = (id: string) => demoWheels.find((w) => w.id === id);
+const pkgById = (id: string) => demoPackages.find((p) => p.id === id);
+const verdictFor = (
+  product:
+    | { vehicleFitments?: { make: string; model: string; yearsStart?: number; yearsEnd?: number }[] }
+    | undefined,
+  make: string,
+  model: string,
+  year?: number,
+) => checkVehicleFitment(product?.vehicleFitments, make, model, year).kind;
+const VX9 = wheelById("w-vortex-vx9-19");
+check("Audi A4 → verdict on the Vortex VX-9", verdictFor(VX9, "Audi", "A4") === "compatible");
+check("BMW M4 → verdict on the Vortex VX-9", verdictFor(VX9, "BMW", "M4") === "compatible");
+check("Mercedes-Benz A180 → verdict on the Vortex VX-9", verdictFor(VX9, "Mercedes-Benz", "A180") === "compatible");
+check("Volkswagen Tiguan → verdict on the Vortex VX-9", verdictFor(VX9, "Volkswagen", "Tiguan") === "compatible");
+check("Nissan X-Trail → verdict on the Vortex VX-9", verdictFor(VX9, "Nissan", "X-Trail") === "compatible");
+check("Toyota Supra → verdict on the Vortex VX-9", verdictFor(VX9, "Toyota", "Supra") === "compatible");
+check("Audi Q5 → verdict on the Forza R1", verdictFor(wheelById("w-forza-r1-18"), "Audi", "Q5") === "compatible");
+check("Mercedes-Benz GLC → verdict on the Forza R1", verdictFor(wheelById("w-forza-r1-18"), "Mercedes-Benz", "GLC") === "compatible");
+check("Audi A4 → verdict on the Turbo T-6", verdictFor(wheelById("w-turbo-t6-19"), "Audi", "A4") === "compatible");
+check("Audi A4 → verdict on the Track Day pack", verdictFor(pkgById("pkg-track-day"), "Audi", "A4") === "compatible");
+check("the verdict is case-insensitive, as the UI sends it", verdictFor(VX9, "audi", "a4") === "compatible");
+// Honest non-matches — a verdict is never fabricated.
+check("a model in no record → 'not-listed', never 'compatible'", verdictFor(VX9, "Chery", "Omoda 5") === "not-listed");
+check("an unlisted model on the Forza R1 → 'not-listed'", verdictFor(wheelById("w-forza-r1-18"), "Chery", "Tiggo 8") === "not-listed");
+check(
+  "a make the product does not list → 'not-listed' (no blanket German fitment)",
+  verdictFor(wheelById("w-turbo-t6-19"), "BMW", "3 Series") === "not-listed",
+);
+check("a record-free product → 'no-data' (the honest 'we'll verify' path)", verdictFor(pkgById("pkg-gt-sport"), "Audi", "A4") === "no-data");
+check(
+  "the Street Pro pack keeps only its original records",
+  verdictFor(pkgById("pkg-street-pro"), "Audi", "A4") === "not-listed" &&
+    verdictFor(pkgById("pkg-street-pro"), "Ford", "Fiesta") === "compatible",
+);
+check(
+  "a year outside a record's range → 'not-listed'",
+  verdictFor(wheelById("w-forza-r1-18"), "BMW", "3 Series", 2018) === "compatible" &&
+    verdictFor(wheelById("w-forza-r1-18"), "BMW", "3 Series", 1996) === "not-listed",
+);
+check(
+  "Apex A-7: the 5x100 record matches old Golfs only",
+  verdictFor(wheelById("w-apex-a7-18"), "Volkswagen", "Golf", 2000) === "compatible" &&
+    verdictFor(wheelById("w-apex-a7-18"), "Volkswagen", "Golf", 2022) === "not-listed",
+);
+// The plate path is untouched: no vehicle is ever invented from a registration.
+const demoPlate = await demoProvider.lookupVehicleByReg("AB12CDE");
+check(
+  "a plate is still never turned into a vehicle ('unavailable', no vehicle)",
+  demoPlate.status === "unavailable" && !demoPlate.vehicle,
+  JSON.stringify(demoPlate),
+);
+const coveredVariants = new Set(
+  withRecords.flatMap((p) => (p.vehicleFitments ?? []).map((f) => `${f.make} ${f.model}`)),
+);
+console.log(
+  `  … ${withRecords.length} products carry sample fitment records covering ${coveredVariants.size} make/model variants`,
+);
 console.log("---");
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 if (fails.length) console.log(fails.map((f) => ` - ${f}`).join("\n"));
