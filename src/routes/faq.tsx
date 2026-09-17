@@ -18,7 +18,7 @@ export const Route = createFileRoute("/faq")({
 const FAQS: { q: string; a: string }[] = [
   {
     q: "How do you check a wheel will fit my car?",
-    a: "Every order is verified against your exact vehicle before we confirm it — bolt pattern (PCD), offset, centre bore (with spigot rings where needed), brake clearance and TPMS requirements. Nothing is recommended with a blanket 'it'll fit' promise; the check is done on your specific car, and the site's fitment data is sample data until a live UK registration lookup is connected.",
+    a: "Every order is verified against your exact vehicle before we confirm it — bolt pattern (PCD), offset, centre bore (with spigot rings where needed), brake clearance and TPMS requirements. Nothing is recommended with a blanket 'it'll fit' promise; the check is done on your specific car. The plate lookup reads your car from the live UK registration record, while the wheel and tyre fitment data on the site is sample data.",
   },
   {
     q: "Is the catalogue real stock?",

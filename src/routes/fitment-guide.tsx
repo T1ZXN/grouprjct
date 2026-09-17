@@ -100,8 +100,8 @@ function FitmentGuidePage() {
         <p>
           We verify compatibility with your exact vehicle — geometry, PCD, offset, centre bore,
           brake clearance and TPMS — before confirming any order. This page is educational only
-          and not a fitment guarantee; the sample fitment records on product pages are demo
-          data until a live UK registration lookup is connected.
+          and not a fitment guarantee; the plate lookup reads your car from the live UK
+          registration record, while the fitment records on product pages are sample data.
         </p>
       </NoteBox>
 

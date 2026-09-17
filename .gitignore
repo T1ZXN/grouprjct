@@ -25,3 +25,7 @@ src/routeTree.gen.ts
 
 # Static Netlify export (generated) — regenerable, never commit.
 dist-netlify/
+# Netlify deploy bundle produced by the deploy flow (zips the export, incl. the
+# generated reg-lookup function with the provider key inlined at export time).
+# Generated artifact + carries a secret — NEVER commit.
+dist-netlify.zip

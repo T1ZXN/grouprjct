@@ -17,12 +17,12 @@
  *                   same "we'll verify…" promise.
  *
  * The vehicle itself is identified THROUGH the provider layer
- * (`getFitments`), so the same seam that will carry a live UK reg / fits API
- * later already feeds this component: with no API key the layer returns
- * clearly-labelled demo fitment data; with a key it returns live results in
- * the same shape. No verdict ever claims universal fitment or guarantees
- * anything. A link to /fitment offers the registration-plate path for the
- * future UK reg-API integration (again demo until then).
+ * (`getFitments`), so the same seam carries the live UK registration lookup
+ * (/fitment) and, later, a licensed fitment database: fitment options here are
+ * clearly-labelled SAMPLE data, while the plate path on /fitment reads the live
+ * UK registration record through the site's same-origin proxy. No verdict ever
+ * claims universal fitment or guarantees anything — the plate lookup's result
+ * never changes a verdict on this page.
  */
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";

@@ -4,7 +4,24 @@ import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 
+// ── Reg-lookup provider key: NEVER let the client build see it ───────────────
+// Vite inlines every VITE_* variable it can see — the whole `import.meta.env`
+// object is baked into the client chunks — so a key left in the process env
+// ends up readable in the public JS bundle (credit-misuse risk). The plate
+// lookup therefore runs through the SAME-ORIGIN PROXY (netlify/functions/
+// reglookup.js): the key is inlined into that server-side function at export
+// time by export-netlify.ts, and the build strips it from the Vite env here.
+//
+// Note: live-vs-demo is NOT decided here. It is decided in src/lib/reglookup.ts
+// from VITE_REG_LOOKUP_PROXY (absent = the proxy build, "0" = labelled demo
+// build) so the SSR/prerender and the client bundle always agree — a
+// build-time-only flag that reached one bundle but not the other would cause a
+// hydration mismatch in the fitment labels.
+const REG_LOOKUP_KEY_ENV = "VITE_REG_LOOKUP_KEY";
+delete process.env[REG_LOOKUP_KEY_ENV];
+
 export default defineConfig({
+
   server: {
     port: 3000,
     host: true,
