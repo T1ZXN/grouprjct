@@ -34,6 +34,9 @@
  * and runs with NO .env file at all — missing keys simply mean demo mode.
  */
 import { demoProvider } from "./reglookup-demo";
+import { FITS_API_ENV_KEY as FITS_API_ENV_KEY_CONST, fitsProvider } from "./reglookup-fits";
+import { createLiveProvider, LIVE_PROVIDER_ID } from "./reglookup-live";
+import { REG_LOOKUP_ENV_KEY as REG_LOOKUP_ENV_KEY_CONST, ukVrmProvider } from "./reglookup-ukvrm";
 
 /** A vehicle as identified by a registration lookup (or manual details). */
 export interface Vehicle {
@@ -132,9 +135,19 @@ export function registerProvider(provider: VehicleDataProvider): void {
 }
 providers.set(demoProvider.id, demoProvider);
 
-/** Env keys for the future real providers (Vite client env, see top docblock). */
-const REG_LOOKUP_ENV_KEY = "VITE_REG_LOOKUP_KEY" as const;
-const FITS_API_ENV_KEY = "VITE_FITS_API_KEY" as const;
+/**
+ * LIVE providers, registered at startup. Each declares the Vite client-env key
+ * that activates it; neither does anything until its key is configured, so the
+ * site ships in honest demo mode by default.
+ *   • ukVrmProvider  — plate -> vehicle   (VITE_REG_LOOKUP_KEY)
+ *   • fitsProvider   — vehicle -> fitments (VITE_FITS_API_KEY)
+ */
+registerProvider(ukVrmProvider);
+registerProvider(fitsProvider);
+
+/** Env keys for the real providers (Vite client env, see top docblock). */
+const REG_LOOKUP_ENV_KEY = REG_LOOKUP_ENV_KEY_CONST;
+const FITS_API_ENV_KEY = FITS_API_ENV_KEY_CONST;
 
 /** The Vite client env object (import.meta.env); {} when absent. */
 function readClientEnv(): Record<string, string | boolean | undefined> {
@@ -169,8 +182,15 @@ export function getConfiguredKeys(): { regLookupKey?: string; fitsApiKey?: strin
  */
 export function getActiveProvider(): VehicleDataProvider {
   const { regLookupKey, fitsApiKey } = getConfiguredKeys();
+  const reg = regLookupKey ? providers.get(ukVrmProvider.id) : undefined;
+  const fits = fitsApiKey ? providers.get(fitsProvider.id) : undefined;
+  // ═══ LIVE MODE: any real key -> the composite live provider ═══
+  // Exactly which capability is live is named in the provider label, and each
+  // result carries its own source label, so nothing here is ever mislabelled.
+  if (reg || fits) return createLiveProvider({ reg, fits });
+  // Any other registered provider whose key is configured (future providers).
   for (const provider of providers.values()) {
-    if (!provider.keyName) continue; // demo provider / keyless providers
+    if (!provider.keyName || provider.id === DEMO_PROVIDER_ID) continue;
     const hasKey =
       (provider.keyName === REG_LOOKUP_ENV_KEY && Boolean(regLookupKey)) ||
       (provider.keyName === FITS_API_ENV_KEY && Boolean(fitsApiKey));

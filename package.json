@@ -13,7 +13,8 @@
     "test:supabase": "bun ./scripts/test-supabase.ts",
     "test:supabase-import": "bun ./scripts/test-supabase-import.ts",
     "test:excel-import": "bun ./scripts/test-excel-import.ts",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:reglookup": "bun ./scripts/test-reglookup.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
