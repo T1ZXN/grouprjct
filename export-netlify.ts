@@ -49,6 +49,8 @@ const TOP_LEVEL = [
   "/tyres",
   "/packages",
   "/accessories",
+  "/basket",
+  "/checkout",
   "/about",
   "/contact",
   "/delivery",
@@ -167,8 +169,8 @@ route is real HTML, with the hashed JS/CSS and images alongside. Netlify can hos
 it as-is: no Node server, no build step, works on the free tier.
 
 ## What's inside
-- \`index.html\` + \`<route>/index.html\` for all 37 routes (home, catalogue,
-  product detail pages, info pages, /admin)
+- \`index.html\` + \`<route>/index.html\` for all ${routes.length} routes (home, catalogue,
+  product detail pages, basket & checkout, info pages, /admin)
 - \`assets/\` — hashed client JS/CSS (\`/assets/...\`)
 - \`images/\` — product & category imagery (\`/images/...\`)
 - \`netlify.toml\` — publish directory = \`.\`
@@ -208,7 +210,10 @@ SSR handler, recopies assets/images and rewrites the preview host to
   (a full grep of the export for secrets, env-var names and supplier domains is
   part of the verification script).
 - No checkout/payment functionality is included — payment stays off until real
-  credentials exist.
+  credentials exist. (The basket and /checkout pages ARE exported, but they take
+  no payment: with no payment provider configured, checkout hands the customer
+  to an email enquiry and says so plainly. No success screen or order number
+  exists anywhere in the export.)
 `,
     "utf8"
   );

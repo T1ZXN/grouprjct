@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Breadcrumb, SpecTable } from "~/components/SpecTable";
 import { StockChip } from "~/components/ProductCard";
 import { FitmentChecker } from "~/components/FitmentChecker";
+import { AddToBasket } from "~/components/AddToBasket";
 import { DEMO_NOTICE, demoWheels, wheelSizeLabel } from "~/data/products";
 import type { Wheel } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
@@ -62,7 +63,10 @@ export const Route = createFileRoute("/wheels/$id")({
       ? [
           {
             type: "application/ld+json",
-            children: JSON.stringify(wheelJsonLd(loaderData)).replace(/</g, "\\u003c"),
+            children: JSON.stringify(wheelJsonLd(loaderData)).replace(
+              /</g,
+              "\\u003c",
+            ),
           },
         ]
       : [],
@@ -79,7 +83,7 @@ function WheelDetailPage() {
   const live = useLiveProduct<Wheel>(params.id, "wheels");
   const wheel = live ?? sample;
   if (!wheel) return <WheelNotFound />;
-  return <WheelDetail wheel={ wheel } />;
+  return <WheelDetail wheel={wheel} />;
 }
 
 function WheelDetail({ wheel }: { wheel: Wheel }) {
@@ -113,23 +117,34 @@ function WheelDetail({ wheel }: { wheel: Wheel }) {
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-white sm:text-4xl">
               {wheel.name}
             </h1>
-            <p className="mt-2 text-lg font-semibold text-white">{wheelSizeLabel(wheel.size)}</p>
+            <p className="mt-2 text-lg font-semibold text-white">
+              {wheelSizeLabel(wheel.size)}
+            </p>
             <p className="mt-1 text-sm text-steel">{wheel.finish}</p>
 
             <div className="mt-5 flex flex-wrap items-center gap-4">
-              <p className="text-3xl font-bold text-white">{formatGBP(wheel.retailPriceIncVat)}</p>
+              <p className="text-3xl font-bold text-white">
+                {formatGBP(wheel.retailPriceIncVat)}
+              </p>
               <StockChip status={wheel.stockStatus} />
             </div>
-            <p className="mt-1 text-xs text-steel-dim">Price includes UK VAT at 20%.</p>
+            <p className="mt-1 text-xs text-steel-dim">
+              Price includes UK VAT at 20%.
+            </p>
 
-            <p className="mt-5 text-sm leading-relaxed text-steel">{wheel.description}</p>
-            <p className="mt-3 text-sm font-semibold text-white">{wheel.includedBolts}</p>
+            <p className="mt-5 text-sm leading-relaxed text-steel">
+              {wheel.description}
+            </p>
+            <p className="mt-3 text-sm font-semibold text-white">
+              {wheel.includedBolts}
+            </p>
 
             <div className="mt-5 rounded-lg border border-race/30 bg-race/5 p-4 text-sm leading-relaxed text-steel">
-              We verify compatibility with your exact vehicle — geometry, PCD, offset and centre
-              bore — before confirming any order.
+              We verify compatibility with your exact vehicle — geometry, PCD,
+              offset and centre bore — before confirming any order.
             </div>
-            <Link to="/fitment" className="btn btn-red mt-6">
+            <AddToBasket product={wheel} />
+            <Link to="/fitment" className="btn btn-outline mt-3">
               Find Wheels For My Car
             </Link>
           </div>
@@ -146,7 +161,10 @@ function WheelDetail({ wheel }: { wheel: Wheel }) {
               { label: "Offset (ET)", value: wheel.size.offset },
               { label: "Colour", value: wheel.colour },
               { label: "Finish", value: wheel.finish },
-              { label: "Price inc. VAT", value: formatGBP(wheel.retailPriceIncVat) },
+              {
+                label: "Price inc. VAT",
+                value: formatGBP(wheel.retailPriceIncVat),
+              },
               { label: "Included", value: wheel.includedBolts },
             ]}
           />
@@ -156,8 +174,9 @@ function WheelDetail({ wheel }: { wheel: Wheel }) {
             </h2>
             <div className="p-5">
               <p className="text-sm leading-relaxed text-steel">
-                Make-level guidance only (sample data): these makes commonly run fitments like
-                this. Every order is checked against your exact vehicle before confirmation.
+                Make-level guidance only (sample data): these makes commonly run
+                fitments like this. Every order is checked against your exact
+                vehicle before confirmation.
               </p>
               <ul className="mt-4 flex flex-wrap gap-2">
                 {wheel.vehicleCompatibility.map((make) => (
@@ -229,8 +248,8 @@ function FittingInfo({ wheel }: { wheel: Wheel }) {
       </h2>
       <div className="p-5">
         <p className="text-sm leading-relaxed text-steel">
-          The numbers on a wheel tell you whether it can physically go on your car. Here&apos;s
-          what they mean:
+          The numbers on a wheel tell you whether it can physically go on your
+          car. Here&apos;s what they mean:
         </p>
         <ul className="mt-4 space-y-3.5">
           {points.map((p) => (
@@ -241,9 +260,9 @@ function FittingInfo({ wheel }: { wheel: Wheel }) {
           ))}
         </ul>
         <p className="mt-5 text-xs leading-relaxed text-steel-dim">
-          Every order is checked against your exact vehicle (geometry, PCD, offset, centre bore
-          and brake clearance) before we confirm it — this guide is educational only and not a
-          fitment guarantee.
+          Every order is checked against your exact vehicle (geometry, PCD,
+          offset, centre bore and brake clearance) before we confirm it — this
+          guide is educational only and not a fitment guarantee.
         </p>
       </div>
     </div>
@@ -259,7 +278,8 @@ function WheelNotFound() {
           Wheel not found
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-steel sm:text-base">
-          That wheel isn&apos;t in the sample catalogue — it may be part of a future feed update.
+          That wheel isn&apos;t in the sample catalogue — it may be part of a
+          future feed update.
         </p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <Link to="/wheels" className="btn btn-outline">

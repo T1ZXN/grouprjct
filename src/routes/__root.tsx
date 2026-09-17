@@ -1,5 +1,11 @@
-import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
+import {
+  HeadContent,
+  Outlet,
+  Scripts,
+  createRootRoute,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { BasketProvider } from "~/components/BasketProvider";
 import { Footer } from "~/components/Footer";
 import { Header } from "~/components/Header";
 import appCss from "~/styles/app.css?url";
@@ -30,15 +36,27 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/png", href: "/images/favicon-64.png", sizes: "64x64" },
-      { rel: "icon", type: "image/png", href: "/images/favicon-192.png", sizes: "192x192" },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: "/images/favicon-64.png",
+        sizes: "64x64",
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: "/images/favicon-192.png",
+        sizes: "192x192",
+      },
       { rel: "apple-touch-icon", href: "/images/apple-touch-icon-180.png" },
     ],
   }),
   notFoundComponent: () => (
     <div className="container-x py-24 text-center">
       <p className="text-lg font-bold text-white">Page not found</p>
-      <p className="mt-2 text-sm text-steel">The page you were looking for doesn't exist (yet).</p>
+      <p className="mt-2 text-sm text-steel">
+        The page you were looking for doesn't exist (yet).
+      </p>
     </div>
   ),
   component: RootComponent,
@@ -47,9 +65,12 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <Header />
-      <Outlet />
-      <Footer />
+      {/* Basket state is available to the header badge and every product page. */}
+      <BasketProvider>
+        <Header />
+        <Outlet />
+        <Footer />
+      </BasketProvider>
     </RootDocument>
   );
 }

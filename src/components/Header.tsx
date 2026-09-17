@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { useBasket } from "~/components/BasketProvider";
 import { NAV_LINKS } from "~/lib/nav";
 import {
   BasketIcon,
@@ -19,6 +20,7 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const { count } = useBasket();
   const navigate = useNavigate();
 
   const submitSearch = (e: FormEvent) => {
@@ -33,7 +35,11 @@ export function Header() {
     <header className="sticky top-0 z-50 border-b border-line bg-night">
       {/* Row 1 — logo, actions, CTA */}
       <div className="container-x flex h-[112px] items-center justify-between gap-2 sm:gap-4">
-        <Link to="/" aria-label="N2 Wheels — home" className="flex shrink-0 items-center">
+        <Link
+          to="/"
+          aria-label="N2 Wheels — home"
+          className="flex shrink-0 items-center"
+        >
           {/* Owner's official logo (transparent web version — image only, no wordmark) */}
           <img
             src="/images/logo-n2.png"
@@ -66,18 +72,24 @@ export function Header() {
             <UserIcon className="h-5 w-5" />
           </button>
 
-          {/* Basket — non-functional for now */}
-          <button
-            type="button"
-            aria-label="Basket (0 items) — coming soon"
-            title="Basket — coming soon"
-            className="relative hidden h-10 w-10 cursor-pointer place-items-center rounded-md text-steel transition-colors hover:text-white sm:grid"
+          {/* Basket — real, localStorage-backed count (link to /basket) */}
+          <Link
+            to="/basket"
+            aria-label={
+              count === 0
+                ? "Basket — empty"
+                : `Basket — ${count} item${count === 1 ? "" : "s"}`
+            }
+            title="View your basket"
+            className="relative grid h-10 w-10 cursor-pointer place-items-center rounded-md text-steel transition-colors hover:text-white"
           >
             <BasketIcon className="h-5 w-5" />
-            <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-race px-0.5 text-[10px] font-bold leading-none text-white">
-              0
-            </span>
-          </button>
+            {count > 0 && (
+              <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-race px-0.5 text-[10px] font-bold leading-none text-white">
+                {count}
+              </span>
+            )}
+          </Link>
 
           {/* Red CTA — always visible, compact label on very small screens */}
           <Link to="/fitment" className="btn btn-red !px-3 !py-2.5 sm:!px-5">
@@ -93,7 +105,11 @@ export function Header() {
             aria-label={mobileOpen ? "Close menu" : "Open menu"}
             className="grid h-10 w-10 cursor-pointer place-items-center rounded-md text-steel transition-colors hover:text-white lg:hidden"
           >
-            {mobileOpen ? <CloseIcon className="h-5 w-5" /> : <MenuIcon className="h-5 w-5" />}
+            {mobileOpen ? (
+              <CloseIcon className="h-5 w-5" />
+            ) : (
+              <MenuIcon className="h-5 w-5" />
+            )}
           </button>
         </div>
       </div>
@@ -101,7 +117,11 @@ export function Header() {
       {/* Search panel */}
       {searchOpen && (
         <div className="border-t border-line bg-carbon">
-          <form onSubmit={submitSearch} className="container-x flex gap-2 py-3" role="search">
+          <form
+            onSubmit={submitSearch}
+            className="container-x flex gap-2 py-3"
+            role="search"
+          >
             <label htmlFor="site-search" className="sr-only">
               Search products
             </label>
@@ -142,7 +162,10 @@ export function Header() {
 
       {/* Mobile menu panel */}
       {mobileOpen && (
-        <nav aria-label="Mobile navigation" className="border-t border-line bg-carbon lg:hidden">
+        <nav
+          aria-label="Mobile navigation"
+          className="border-t border-line bg-carbon lg:hidden"
+        >
           <ul className="container-x flex flex-col py-2">
             {NAV_LINKS.map((link) => (
               <li key={link.to}>

@@ -26,13 +26,15 @@ check() { # route  marker...
   if [ "$ok" = 1 ]; then pass=$((pass+1)); echo "PASS 200 $route"; else fail=$((fail+1)); echo "FAIL $code $route"; fi
 }
 
-# --- 19 top-level routes ---
+# --- 21 top-level routes ---
 check "/"                    "Wheels That Fit." "Alloy Wheels, Tyres"
 check "/fitment"             "Find Wheels For My Car"
 check "/wheels"              "Alloy Wheels UK"
 check "/tyres"               "Tyres UK"
 check "/packages"            "Tyre Packages UK"
 check "/accessories"         "Wheel Accessories"
+check "/basket"              "Your basket" "Sample data"
+check "/checkout"            "Checkout" "enquiry@n2wheels.co.uk"
 check "/about"               "About Us"
 check "/contact"             "Contact N2 Wheels" "enquiry@n2wheels.co.uk"
 check "/delivery"            "Delivery"

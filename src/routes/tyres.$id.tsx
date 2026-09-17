@@ -5,6 +5,7 @@ import { DEMO_NOTICE, demoTypes, tyreSizeLabel } from "~/data/products";
 import type { Tyre } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
 import { useLiveProduct } from "~/lib/liveCatalogue";
+import { AddToBasket } from "~/components/AddToBasket";
 
 export const Route = createFileRoute("/tyres/$id")({
   loader: ({ params }) => demoTypes.find((t) => t.id === params.id) ?? null,
@@ -35,7 +36,7 @@ function TyreDetailPage() {
   const live = useLiveProduct<Tyre>(params.id, "tyres");
   const tyre = live ?? sample;
   if (!tyre) return <TyreNotFound />;
-  return <TyreDetail tyre={ tyre } />;
+  return <TyreDetail tyre={tyre} />;
 }
 
 function TyreDetail({ tyre }: { tyre: Tyre }) {
@@ -67,25 +68,35 @@ function TyreDetail({ tyre }: { tyre: Tyre }) {
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-white sm:text-4xl">
               {tyre.name}
             </h1>
-            <p className="mt-2 text-lg font-semibold text-white">{tyreSizeLabel(tyre)}</p>
+            <p className="mt-2 text-lg font-semibold text-white">
+              {tyreSizeLabel(tyre)}
+            </p>
             <p className="mt-1 text-sm text-steel">
-              Load index {tyre.loadIndex.split(" ")[0]} · Speed rating {tyre.speedRating}
+              Load index {tyre.loadIndex.split(" ")[0]} · Speed rating{" "}
+              {tyre.speedRating}
             </p>
 
             <div className="mt-5 flex flex-wrap items-center gap-4">
-              <p className="text-3xl font-bold text-white">{formatGBP(tyre.retailPriceIncVat)}</p>
+              <p className="text-3xl font-bold text-white">
+                {formatGBP(tyre.retailPriceIncVat)}
+              </p>
               <StockChip status={tyre.stockStatus} />
             </div>
-            <p className="mt-1 text-xs text-steel-dim">Price includes UK VAT at 20%.</p>
+            <p className="mt-1 text-xs text-steel-dim">
+              Price includes UK VAT at 20%.
+            </p>
 
-            <p className="mt-5 text-sm leading-relaxed text-steel">{tyre.description}</p>
+            <p className="mt-5 text-sm leading-relaxed text-steel">
+              {tyre.description}
+            </p>
 
             <div className="mt-5 rounded-lg border border-race/30 bg-race/5 p-4 text-sm leading-relaxed text-steel">
-              Check your current tyre size before ordering — we verify the exact fitment for your
-              vehicle before confirming any order.
+              Check your current tyre size before ordering — we verify the exact
+              fitment for your vehicle before confirming any order.
             </div>
 
-            <Link to="/tyres" className="btn btn-red mt-6">
+            <AddToBasket product={tyre} />
+            <Link to="/tyres" className="btn btn-outline mt-3">
               Browse Tyres
             </Link>
           </div>
@@ -102,7 +113,10 @@ function TyreDetail({ tyre }: { tyre: Tyre }) {
               { label: "Load index", value: tyre.loadIndex },
               { label: "Speed rating", value: tyre.speedRating },
               { label: "Season", value: tyre.season },
-              { label: "Price inc. VAT", value: formatGBP(tyre.retailPriceIncVat) },
+              {
+                label: "Price inc. VAT",
+                value: formatGBP(tyre.retailPriceIncVat),
+              },
             ]}
           />
           <p className="mt-5 text-xs text-steel-dim">{DEMO_NOTICE}</p>
@@ -121,7 +135,8 @@ function TyreNotFound() {
           Tyre not found
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-steel sm:text-base">
-          That tyre isn&apos;t in the sample catalogue — it may be part of a future feed update.
+          That tyre isn&apos;t in the sample catalogue — it may be part of a
+          future feed update.
         </p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <Link to="/tyres" className="btn btn-outline">
