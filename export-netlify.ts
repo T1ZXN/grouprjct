@@ -6,6 +6,10 @@
  *  - Runs the built TanStack Start SSR handler (dist/server/server.js) against
  *    every known route and saves the rendered HTML as <route>/index.html, so
  *    Netlify can host the whole site as pure static files (no Node server).
+ *    Each route is REQUESTED in its trailing-slash form (`/wheels/`,
+ *    `/wheels/<id>/`) — that is the canonical URL of a directory index.html on
+ *    the host, and since the router sets `trailingSlash: "always"` the handler
+ *    answers 307 (not 200) for the slash-less form.
  *  - Copies the hashed client JS/CSS (dist/client/assets) and the public images
  *    (dist/client/images) next to the pages; the app references assets with
  *    root-absolute paths (/assets/...), which resolve unchanged on a static host.
@@ -95,8 +99,19 @@ function log(ok: boolean, msg: string) {
   console.log(`${ok ? "  ✓" : "  ✗"} ${msg}`);
 }
 
+/**
+ * The request path the deployed site actually serves, for a route as listed in
+ * TOP_LEVEL / detailPaths: every page is a DIRECTORY holding an index.html, and
+ * the router is configured with `trailingSlash: "always"` (src/router.tsx), so
+ * the canonical form — and the only form the SSR handler answers 200 for —
+ * carries a trailing slash. `/` stays `/`.
+ */
+function publicPath(route: string): string {
+  return route === "/" ? "/" : `${route.replace(/\/+$/, "")}/`;
+}
+
 async function prerender(route: string): Promise<void> {
-  const url = PUBLIC_HOST + route;
+  const url = PUBLIC_HOST + publicPath(route);
   const res = await fetchHandler.fetch(
     new Request(url, { headers: { accept: "text/html", "accept-encoding": "identity" } })
   );
@@ -106,7 +121,7 @@ async function prerender(route: string): Promise<void> {
   const filePath =
     route === "/"
       ? path.join(OUT, "index.html")
-      : path.join(OUT, route.replace(/^\//, ""), "index.html");
+      : path.join(OUT, publicPath(route).replace(/^\//, ""), "index.html");
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, html, "utf8");
   const status = res.status;
