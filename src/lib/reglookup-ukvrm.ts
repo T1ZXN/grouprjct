@@ -1,30 +1,39 @@
 /**
  * N2 Wheels — UK REGISTRATION-LOOKUP ADAPTER (plate -> vehicle), LIVE MODE.
  *
- * Implements `VehicleDataProvider` (see src/lib/reglookup.ts) against a
- * commercial UK vehicle-registration API that returns the DVLA record plus a
- * model resolved from the MOT record.
+ * Implements `VehicleDataProvider` (see src/lib/reglookup.ts) against the
+ * VehicleMatic "Vehicle Details" API, which returns the DVLA registration
+ * record for a plate (make, model, year, fuel, engine size, colour, …).
  *
- *   GET {base}/{VRM}          e.g. https://api.vehiclematic.com/v1/vehicle/AB12CDE
- *   auth: "Authorization: Bearer <key>"  (VehicleMatic-style)
- *      or "x-api-key: <key>"             (VITE_REG_LOOKUP_AUTH=x-api-key / DVLA VES style)
+ *   GET {base}/{VRM}   e.g. https://vehiclematic.com/products/vehicle-details/api/live/AB12CDE
+ *   auth: "X-VEHICLEMATIC-KEY: <key>"   (VehicleMatic — the default here)
+ *      or "Authorization: Bearer <key>"  (VITE_REG_LOOKUP_AUTH=bearer, other providers)
+ *      or "x-api-key: <key>"             (VITE_REG_LOOKUP_AUTH=x-api-key, e.g. DVLA VES style)
  *   200 -> { "data": { "registration_number", "make", "model", "colour",
  *            "fuel_type", "engine_capacity", "year_of_manufacture",
  *            "month_of_first_registration", ... }, "credit_balance": n }
- *   404 -> no vehicle in the register; 429/5xx -> provider error.
+ *   400/404/422 -> no usable record for that plate (honest "no-match");
+ *   401 -> key missing/invalid, 402 -> no lookup credits left,
+ *   403 -> key not authorised for this product, 429/5xx -> provider error.
+ *
+ * VALIDATED LIVE (2026-09-17): the base URL above, the X-VEHICLEMATIC-KEY
+ * header and the payload shape below were confirmed against the real endpoint
+ * (the provider answered 403 "not authorised for this product" with the key
+ * configured at that time — i.e. host + header are right, the account's
+ * product scope/credits are the remaining owner-side step). See the team's
+ * VehicleMatic API findings for the exact probe log.
  *
  * HONESTY CONTRACT (never relax):
  *   • live mode is only reachable when a real key is configured (VITE_REG_LOOKUP_KEY);
  *   • a plate is NEVER turned into a guessed vehicle — an unrecognised payload is
- *     an honest error, and a 404 is an honest "no-match" with no vehicle;
- *   • provider errors are surfaced as errors (never silently replaced by sample data).
+ *     an honest error, and a no-record response is an honest "no-match" with no vehicle;
+ *   • provider errors are surfaced as errors (never silently replaced by sample data);
+ *   • a lookup that failed is never reported as a found vehicle.
  *
- * ⚠️ The request shape above is coded from the provider's published documentation
- * and has NOT been executed against the live endpoint (no key available in this
- * environment). Base URL and auth scheme are therefore env-overridable, so
- * switching them after the owner pastes a key needs no code change:
- *   VITE_REG_LOOKUP_URL   (default https://api.vehiclematic.com/v1/vehicle)
- *   VITE_REG_LOOKUP_AUTH  "bearer" (default) | "x-api-key"
+ * Base URL and auth scheme stay env-overridable, so swapping providers needs no
+ * code change:
+ *   VITE_REG_LOOKUP_URL   (default https://vehiclematic.com/products/vehicle-details/api/live)
+ *   VITE_REG_LOOKUP_AUTH  "vehiclematic" (default) | "bearer" | "x-api-key"
  */
 import type {
   FitmentsResult,
@@ -38,11 +47,23 @@ import { envString, readClientEnv } from "./reglookup-env";
 export const REG_LOOKUP_ENV_KEY = "VITE_REG_LOOKUP_KEY" as const;
 /** Optional: override the provider base URL without a code change. */
 export const REG_LOOKUP_URL_ENV_KEY = "VITE_REG_LOOKUP_URL" as const;
-/** Optional: "bearer" (default) | "x-api-key". */
+/** Optional: "vehiclematic" (default) | "bearer" | "x-api-key". */
 export const REG_LOOKUP_AUTH_ENV_KEY = "VITE_REG_LOOKUP_AUTH" as const;
 
-/** VehicleMatic-style single-vehicle endpoint (documented shape). */
-export const DEFAULT_UK_VRM_BASE_URL = "https://api.vehiclematic.com/v1/vehicle";
+/**
+ * VehicleMatic "Vehicle Details" single-vehicle endpoint — `GET {base}/{VRM}`.
+ * Live-validated 2026-09-17 (do NOT reintroduce an `api.` subdomain: it does
+ * not resolve; the API lives on the public web host).
+ */
+export const DEFAULT_UK_VRM_BASE_URL = "https://vehiclematic.com/products/vehicle-details/api/live";
+
+/**
+ * Auth scheme the adapter emits.
+ *   "vehiclematic" — `X-VEHICLEMATIC-KEY: <key>` (this provider's own scheme, the default)
+ *   "bearer"       — `Authorization: Bearer <key>` (other providers)
+ *   "x-api-key"    — `x-api-key: <key>` (e.g. DVLA VES style)
+ */
+export type UkVrmAuthMode = "vehiclematic" | "bearer" | "x-api-key";
 
 /** Provider id used in outcomes/labels. */
 export const UK_VRM_PROVIDER_ID = "uk-vrm";
@@ -66,7 +87,7 @@ export interface UkVrmProviderOptions {
   /** The API key. When omitted it is read lazily from the client env. */
   apiKey?: string;
   baseUrl?: string;
-  authMode?: "bearer" | "x-api-key";
+  authMode?: UkVrmAuthMode;
   /** Transport override (tests). Defaults to global fetch. */
   fetchImpl?: FetchLike;
   /** Client env override (tests). Defaults to import.meta.env. */
@@ -127,9 +148,15 @@ export function createUkVrmProvider(options: UkVrmProviderOptions = {}): Vehicle
   const key = () => options.apiKey ?? envString(envOf(), REG_LOOKUP_ENV_KEY);
   const baseUrl = () =>
     options.baseUrl ?? envString(envOf(), REG_LOOKUP_URL_ENV_KEY) ?? DEFAULT_UK_VRM_BASE_URL;
-  const authMode = () => {
-    const m = (options.authMode ?? envString(envOf(), REG_LOOKUP_AUTH_ENV_KEY) ?? "bearer").toLowerCase();
-    return m === "x-api-key" || m === "apikey" || m === "api-key" ? "x-api-key" : "bearer";
+  const authMode = (): UkVrmAuthMode => {
+    const m = (options.authMode ?? envString(envOf(), REG_LOOKUP_AUTH_ENV_KEY) ?? "vehiclematic")
+      .toLowerCase()
+      .replace(/[^a-z-]/g, "");
+    if (m === "bearer" || m === "authorization" || m === "authorization-bearer") return "bearer";
+    if (m === "x-api-key" || m === "apikey" || m === "api-key") return "x-api-key";
+    // "vehiclematic" / "x-vehiclematic-key" / anything unrecognised -> this
+    // provider's own scheme, which is the correct default for VehicleMatic.
+    return "vehiclematic";
   };
 
   async function lookupVehicleByReg(reg: string): Promise<VehicleLookupOutcome> {
@@ -153,7 +180,9 @@ export function createUkVrmProvider(options: UkVrmProviderOptions = {}): Vehicle
     used += 1;
     const url = `${baseUrl().replace(/\/+$/, "")}/${encodeURIComponent(reg)}`;
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (authMode() === "x-api-key") headers["x-api-key"] = apiKey;
+    const mode = authMode();
+    if (mode === "vehiclematic") headers["X-VEHICLEMATIC-KEY"] = apiKey;
+    else if (mode === "x-api-key") headers["x-api-key"] = apiKey;
     else headers["Authorization"] = `Bearer ${apiKey}`;
 
     let res: HttpResponseLike;
@@ -164,13 +193,25 @@ export function createUkVrmProvider(options: UkVrmProviderOptions = {}): Vehicle
         "The live registration service couldn't be reached. No vehicle details were invented — please try again or search by make and model.",
       );
     }
-    if (res.status === 404 || res.status === 400) {
+    if (res.status === 400 || res.status === 404 || res.status === 422) {
       return {
         status: "no-match",
         source: "live",
         providerId: UK_VRM_PROVIDER_ID,
         notice: `No live vehicle record matched that registration. Check the plate and try again, or choose your car manually below — we never guess a vehicle from a plate.`,
       };
+    }
+    if (res.status === 403) {
+      // The provider recognises the key but it isn't authorised for this product.
+      throw new Error(
+        "Live registration lookups are temporarily unavailable. No vehicle details were invented — please search by make and model below and we'll verify compatibility before your order.",
+      );
+    }
+    if (res.status === 402) {
+      // The provider account has no lookup credit left.
+      throw new Error(
+        "Live registration lookups are paused right now. No vehicle details were invented — please search by make and model below and we'll verify compatibility before your order.",
+      );
     }
     if (!res.ok) {
       throw new Error(

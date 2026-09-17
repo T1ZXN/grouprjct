@@ -9,6 +9,12 @@
  *   3. error honesty   — 5xx / unreachable / unreadable payloads throw honest errors and NEVER
  *                        return a fabricated vehicle or fitment; 404 -> honest "no-match" with no vehicle
  *   4. demo honesty    — with no key, a plate is never turned into a vehicle and plate input is still validated
+ *   5. live endpoint   — real VehicleMatic base URL, the X-VEHICLEMATIC-KEY default (bearer / x-api-key
+ *                        still selectable), and 402/403/422 mapped to distinct honest messages
+ *
+ * No network calls and no real API keys: every provider test injects its transport, and the
+ * demo-mode checks run in a child process with the key blanked (the ambient shell may hold a
+ * live key, which must never leak into a test or be printed).
  *
  * Run:  bun run test:reglookup     (or: bun ./scripts/test-reglookup.ts)
  */
@@ -18,7 +24,7 @@ import {
   isLiveMode,
   lookupVehicleByReg,
 } from "../src/lib/reglookup";
-import { createUkVrmProvider, mapVehicleFromPayload } from "../src/lib/reglookup-ukvrm";
+import { createUkVrmProvider, DEFAULT_UK_VRM_BASE_URL, mapVehicleFromPayload } from "../src/lib/reglookup-ukvrm";
 import { createFitsProvider, mapFitmentOptions } from "../src/lib/reglookup-fits";
 import { createLiveProvider, LIVE_PROVIDER_ID } from "../src/lib/reglookup-live";
 
@@ -111,6 +117,29 @@ console.log(JSON.stringify({id:p.id,live:isLiveMode(),label:getProviderLabel(),s
     return { id: "ERROR", live: false, label: proc.stderr.toString().slice(0, 200), status: "error", hasVehicle: false };
   }
 }
+/**
+ * Run a plate lookup through the REAL seam in a child process with a controlled
+ * env, and return the outcome. The demo-mode assertions need this: VITE_REG_LOOKUP_KEY
+ * is a platform secret, so the shell running these tests may already carry a live key
+ * (with live mode active the in-process call would hit the real provider, and "demo mode"
+ * would no longer describe what actually happened). No key is ever printed — the child
+ * reports only the provider id, status, notices and the normalised registration.
+ */
+function seamOutcome(env: Record<string, string>) {
+  const snippet = `import {getActiveProvider,isLiveMode,lookupVehicleByReg} from "${SITE}/src/lib/reglookup.ts";
+let o;try{o=await lookupVehicleByReg("AB12 CDE");}catch(e){console.log(JSON.stringify({threw:true,id:getActiveProvider().id,live:isLiveMode(),status:"threw",hasVehicle:false,notice:"",registration:""}));process.exit(0);}
+console.log(JSON.stringify({threw:false,id:getActiveProvider().id,live:isLiveMode(),status:o.status,hasVehicle:Boolean(o.vehicle),notice:o.notice,registration:o.registration}));`;
+  const proc = Bun.spawnSync({ cmd: ["bun", "-e", snippet], env: { ...process.env, ...env }, cwd: SITE });
+  const line = proc.stdout.toString().trim().split("\n").pop() ?? "";
+  try {
+    return JSON.parse(line) as {
+      threw: boolean; id: string; live: boolean; status: string;
+      hasVehicle: boolean; notice: string; registration: string;
+    };
+  } catch {
+    return { threw: true, id: "ERROR", live: false, status: "error", hasVehicle: false, notice: proc.stderr.toString().slice(0, 200), registration: "" };
+  }
+}
 const noKey = gate({ VITE_REG_LOOKUP_KEY: "", VITE_FITS_API_KEY: "" });
 check("no key -> demo provider", noKey.id === "demo" && noKey.live === false, JSON.stringify(noKey));
 check("no key -> plate lookup unavailable, NO fabricated vehicle", noKey.status === "unavailable" && noKey.hasVehicle === false, JSON.stringify(noKey));
@@ -135,6 +164,14 @@ check("200 -> vehicle from the live payload", ok.vehicle?.make === "FORD" && ok.
 const notFound = await createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(404, {}) }).lookupVehicleByReg("AB12CDE");
 check("404 -> no-match with NO vehicle", notFound.status === "no-match" && !notFound.vehicle, JSON.stringify(notFound));
 check("404 -> honest notice (never guesses)", /never guess a vehicle/i.test(notFound.notice), notFound.notice);
+const badPlate = await createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(422, { error: true, message: "invalid registration" }) }).lookupVehicleByReg("AB12CDE");
+check("422 -> treated as no-match with NO vehicle (check the plate)", badPlate.status === "no-match" && !badPlate.vehicle && /check the plate/i.test(badPlate.notice), JSON.stringify(badPlate));
+const noCredit = createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(402, { error: true, message: "Insufficient credits for this product.", credit_balance: 0 }) });
+await expectThrow("402 insufficient credits -> distinct honest error, no vehicle, no jargon", () => noCredit.lookupVehicleByReg("AB12CDE"), /paused right now/i);
+await expectThrow("402 -> message keeps the no-invention honesty", () => createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(402, {}) }).lookupVehicleByReg("AB12CDE"), /no vehicle details were invented/i);
+await expectThrow("403 key not authorised for the product -> distinct honest error (not a raw HTTP code)", () => createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(403, { error: true, message: "This API key is not authorised for this product." }) }).lookupVehicleByReg("AB12CDE"), /temporarily unavailable/i);
+const err403 = await createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(403, {}) }).lookupVehicleByReg("AB12CDE").then(() => "", (e: unknown) => String((e as Error).message));
+check("403 -> no internal jargon and no 'HTTP 403' leak", !/HTTP 40|API key|product scope|credit/i.test(err403) && !/found/i.test(err403), err403);
 
 await expectThrow("500 -> throws an honest error, no fallback data", () =>
   createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(503, {}) }).lookupVehicleByReg("AB12CDE"), /HTTP 503/);
@@ -151,13 +188,38 @@ check("auth mode x-api-key is honoured", await (async () => {
   let seen = "";
   const p = createUkVrmProvider({ apiKey: "k2", authMode: "x-api-key", fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
-  return /x-api-key/.test(seen) && !/Bearer/.test(seen);
+  return /x-api-key/.test(seen) && !/Bearer/.test(seen) && !/X-VEHICLEMATIC-KEY/.test(seen);
 })());
-check("auth mode bearer is the default", await (async () => {
+check("auth mode bearer is still selectable via options", await (async () => {
+  let seen = "";
+  const p = createUkVrmProvider({ apiKey: "k2", authMode: "bearer", fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  await p.lookupVehicleByReg("AB12CDE");
+  return /Bearer k2/.test(seen) && !/X-VEHICLEMATIC-KEY/.test(seen);
+})());
+check("default auth for this (VehicleMatic) adapter sends X-VEHICLEMATIC-KEY", await (async () => {
   let seen = "";
   const p = createUkVrmProvider({ apiKey: "k2", fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
-  return /Bearer k2/.test(seen);
+  return /"X-VEHICLEMATIC-KEY":"k2"/.test(seen) && !/Bearer/.test(seen) && !seen.toLowerCase().includes("x-api-key");
+})());
+check("VITE_REG_LOOKUP_AUTH can still switch the scheme (bearer via env)", await (async () => {
+  let seen = "";
+  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "k3", VITE_REG_LOOKUP_AUTH: "bearer" }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  await p.lookupVehicleByReg("AB12CDE");
+  return /Bearer k3/.test(seen) && !/X-VEHICLEMATIC-KEY/.test(seen);
+})());
+check("VITE_REG_LOOKUP_AUTH=x-vehiclematic-key also lands on the VehicleMatic header", await (async () => {
+  let seen = "";
+  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "k3", VITE_REG_LOOKUP_AUTH: "x-vehiclematic-key" }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  await p.lookupVehicleByReg("AB12CDE");
+  return /"X-VEHICLEMATIC-KEY":"k3"/.test(seen);
+})());
+check("default base url is the live VehicleMatic Vehicle Details endpoint", DEFAULT_UK_VRM_BASE_URL === "https://vehiclematic.com/products/vehicle-details/api/live", DEFAULT_UK_VRM_BASE_URL);
+check("default request url = {live base}/{VRM} (no api. subdomain)", await (async () => {
+  let url = "";
+  const p = createUkVrmProvider({ apiKey: "k2", fetchImpl: async (u) => { url = u; return jsonResponse(200, REG_PAYLOAD); } });
+  await p.lookupVehicleByReg("AB12CDE");
+  return url === `${DEFAULT_UK_VRM_BASE_URL}/AB12CDE` && !/api\.vehiclematic\.com/.test(url);
 })());
 check("env override supplies base url without code change", await (async () => {
   let url = "";
@@ -188,8 +250,10 @@ check("reg-only composite labels its fitment options as SAMPLE", mixedFits.sourc
 const reglessComposite = await createLiveProvider({ fits: createFitsProvider({ apiKey: "k" }) }).lookupVehicleByReg("AB12CDE");
 check("composite without a reg provider never fabricates a vehicle", reglessComposite.status === "unavailable" && !reglessComposite.vehicle, JSON.stringify(reglessComposite));
 
-const demoOutcome = await lookupVehicleByReg("AB12 CDE");
-check("demo mode: plate is never turned into a vehicle", demoOutcome.status === "unavailable" && !demoOutcome.vehicle, JSON.stringify(demoOutcome));
+// Demo mode is asserted in a child process with the key explicitly blanked, so a key
+// present in the ambient environment can never make this section hit the live provider.
+const demoOutcome = seamOutcome({ VITE_REG_LOOKUP_KEY: "", VITE_FITS_API_KEY: "" });
+check("demo mode: plate is never turned into a vehicle", demoOutcome.id === "demo" && demoOutcome.status === "unavailable" && !demoOutcome.hasVehicle, JSON.stringify(demoOutcome));
 check("demo mode: honest notice tells the customer to use make/model", /choose your car manually/i.test(demoOutcome.notice), demoOutcome.notice);
 check("demo mode: registration is still normalised/returned", demoOutcome.registration === "AB12CDE", demoOutcome.registration);
 await expectThrow("demo mode: invalid plate input is still rejected", () => lookupVehicleByReg("!!!bad"), /valid UK registration/i);
