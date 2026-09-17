@@ -90,10 +90,6 @@ function PackagesPage() {
     [items],
   );
 
-  // A child ($id) route is matched (e.g. /packages/pkg-track-day) — hand off to
-  // the child instead of rendering this list page (this list route is the
-  // parent/layout of the $id detail routes).
-  if (matches.length > 2) return <Outlet />;
 
   const setFilter = (key: string, value: string | undefined) => {
     navigate({
@@ -138,6 +134,17 @@ function PackagesPage() {
 
   const parsedVehicle = parseVehicleParam(search.vehicle);
 
+  // A child ($id) route is matched (e.g. /packages/pkg-track-day) — hand off to
+  // the child instead of rendering this list page (this list route is the
+  // parent/layout of the $id detail routes).
+  //
+  // KEEP THIS CHECK BELOW EVERY HOOK of this component. The list route stays
+  // MOUNTED while its $id child is shown, so returning early from further up
+  // made the list→detail click render fewer hooks than the list render did,
+  // and React threw error #300 — which the app's error boundary surfaced as
+  // "Something went wrong" on every product card click (direct loads were
+  // fine, because there the component mounts already in this branch).
+  if (matches.length > 2) return <Outlet />;
   return (
     <CataloguePage
       title="Wheel & Tyre Packages"

@@ -37,7 +37,7 @@ function wheelJsonLd(w: Wheel) {
       price: w.retailPriceIncVat,
       priceCurrency: "GBP",
       availability: availabilityUri(w.stockStatus),
-      url: `${WHEEL_SITE_BASE}/wheels/${w.id}`,
+      url: `${WHEEL_SITE_BASE}/wheels/${w.id}/`,
       itemCondition: "https://schema.org/NewCondition",
     },
   };
