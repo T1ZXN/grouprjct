@@ -11,6 +11,7 @@
     "go-live": "bash ./go-live.sh",
     "gen:supabase-setup": "bun ./scripts/gen-supabase-setup.ts",
     "test:supabase": "bun ./scripts/test-supabase.ts",
+    "test:supabase-import": "bun ./scripts/test-supabase-import.ts",
     "test:excel-import": "bun ./scripts/test-excel-import.ts",
     "format": "prettier --write ."
   },
