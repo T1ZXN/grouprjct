@@ -13,7 +13,8 @@
  *     outcome: no key configured means we NEVER fabricate a vehicle from a
  *     plate. The UI routes the customer to the manual make/model/year path.
  *   - `demoGetFitments(make, model, year?, variant?)` — returns labelled
- *     sample wheel-fitting guidance drawn from the demo fleet below.
+ *     sample wheel-fitting guidance drawn from the demo fleet
+ *     (src/data/demo-fleet.ts).
  *
  * To go live: copy this file to `reglookup-<provider>.ts`, implement the same
  * `VehicleDataProvider` interface against the provider's API, and register it
@@ -37,22 +38,16 @@ export const DEMO_REG_UNAVAILABLE_NOTICE =
 /** Generic demo vehicle-data label (kept for backwards compatibility). */
 export const DEMO_LOOKUP_NOTICE = DEMO_FITMENTS_NOTICE;
 
-/** Demo fleet (makes -> models) powering the make/model/year selects. */
-export const DEMO_FLEET: Record<string, string[]> = {
-  Audi: ["A3", "A4", "Q5"],
-  BMW: ["1 Series", "3 Series", "X3"],
-  BYD: ["Atto 3", "Dolphin", "Seal"],
-  Changan: ["CS35 Plus", "Eado"],
-  Chery: ["Omoda 5"],
-  Ford: ["Fiesta", "Focus", "Kuga"],
-  Kia: ["Ceed", "Sportage", "Niro"],
-  "Mercedes-Benz": ["A-Class", "C-Class", "GLA"],
-  MG: ["ZS", "HS", "MG4"],
-  Nissan: ["Micra", "Juke", "Qashqai"],
-  Toyota: ["Yaris", "Corolla", "RAV4"],
-  Volkswagen: ["Golf", "Passat", "Tiguan"],
-  Vauxhall: ["Corsa", "Astra", "Mokka"],
-};
+/**
+ * Demo fleet (makes -> models) powering the make/model/year selects.
+ *
+ * The data lives in `src/data/demo-fleet.ts` — ONE source of truth shared with
+ * the per-product sample fitment records in `src/data/products.ts`, so the
+ * dropdown options and the fitment verdict can never drift apart. Re-exported
+ * here (and from reglookup.ts) so every existing import keeps working.
+ */
+export { DEMO_FLEET } from "~/data/demo-fleet";
+import { DEMO_FLEET } from "~/data/demo-fleet";
 
 export const DEMO_MAKES: string[] = Object.keys(DEMO_FLEET);
 
