@@ -54,12 +54,27 @@ fully functional and clearly labelled:
    interface (id, label, keyName, `lookupVehicleByReg`, `getFitments`).
 2. `import` it and `registerProvider(...)` in `reglookup.ts` next to the demo
    registration (see the ═══ SEAM ═══ marker in `getActiveProvider()`).
-3. Set the matching Vite client-env key in the build environment:
-   - `VITE_REG_LOOKUP_KEY` — UK registration-lookup API key (plate → vehicle)
-   - `VITE_FITS_API_KEY` — fitment-database API key (make/model → fits data)
+3. Set the matching Vite client-env key in the build environment (see the table below).
    A registered provider with `keyName` set to the configured key becomes the
    active provider automatically; `isLiveMode()` then reports live and the UI
    swaps its labels. No component or route changes are needed.
+### Live providers (implemented — switch on with a key)
+| Env var (site Secrets) | Provider file | What it enables |
+|------------------------|---------------|-----------------|
+| `VITE_REG_LOOKUP_KEY` | `src/lib/reglookup-ukvrm.ts` | Live **plate → vehicle** lookup (UK registration API; DVLA record + model). |
+| `VITE_FITS_API_KEY` | `src/lib/reglookup-fits.ts` | Live **vehicle → wheel fitting options** (licensed fitment database: diameter/width/PCD/offset). |
+| `VITE_REG_LOOKUP_URL` *(optional)* | `reglookup-ukvrm.ts` | Override the plate-lookup endpoint (default VehicleMatic-style `https://api.vehiclematic.com/v1/vehicle`). |
+| `VITE_REG_LOOKUP_AUTH` *(optional)* | `reglookup-ukvrm.ts` | `bearer` (default) or `x-api-key`, matching the provider's auth header. |
+| `VITE_FITS_API_URL` *(optional)* | `reglookup-fits.ts` | Override the fitment endpoint (default licensed-database search-by-model URL). |
+`src/lib/reglookup-live.ts` composes whichever capabilities are keyed: both →
+live plate match + live fitments; reg only → live plate match with **clearly
+labelled sample** fitment options; fits only → live fitments and an honest "plate
+decoding not connected" message. Nothing fabricates a vehicle or a fitment:
+provider errors surface as errors, a 404 is an honest "no-match", and an empty
+fitment result is reported as no records. A built-in cap of 40 live lookups per
+browser session limits the cost of a leaked browser-side key.
+- Provider shortlist, live prices and sign-up links: `/home/team/shared/reg-provider-shortlist.md`.
+- Adapter tests (mapping, live/demo gating, error honesty): `bun run test:reglookup`.
 
 The site builds and runs with NO `.env` file at all — missing keys simply mean
 demo mode.
