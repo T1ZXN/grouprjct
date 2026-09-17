@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useBasket } from "~/components/BasketProvider";
 import { OrderSummaryLines, OrderTotals } from "~/components/OrderSummary";
 import {
+  canTakeOnlinePayment,
   CHECKOUT_EMAIL,
   customerText,
   EMPTY_CUSTOMER,
@@ -17,8 +18,19 @@ import type {
   CheckoutOutcome,
   CheckoutValidationErrors,
 } from "~/lib/checkout";
+import { registerStripeCheckoutProvider } from "~/lib/checkout-stripe";
 import type { BasketLine } from "~/lib/basket";
 import { formatGBP } from "~/lib/pricing";
+
+/**
+ * Register the live hosted-checkout provider (Stripe Payment Link) when the
+ * build environment configures one (`VITE_CHECKOUT_URL` — see
+ * src/lib/checkout-stripe.ts). With no such value this is a no-op and checkout
+ * stays on the seam's honest email handoff. Registration is build-config driven:
+ * the provider's label and its honest demo-payment note come from that config,
+ * never from this page.
+ */
+registerStripeCheckoutProvider();
 
 /**
  * /checkout — order summary + UK delivery details, behind the payment seam
@@ -26,10 +38,15 @@ import { formatGBP } from "~/lib/pricing";
  *
  * NO CARD FIELDS EXIST ON THIS PAGE, and it can never end on a "thank you" style
  * screen or a payment reference: the only outcomes the seam can return are
- * "redirect" (to a real hosted payment page, when configured), "invalid" (basket
- * or details need fixing) and "handoff" (the honest default — the order is
- * prepared as an email to our team because the site cannot take online card
- * payments yet).
+ * "redirect" (to the payment provider's own hosted page, when a checkout URL is
+ * configured), "invalid" (basket or details need fixing) and "handoff" (the
+ * honest default — the order is prepared as an email to our team because the
+ * site has no payment configuration).
+ *
+ * When the site CAN take a payment, the notice below states plainly what is
+ * really happening: the catalogue is sample data, the connected link charges a
+ * fixed test amount rather than the basket total, and any confirmation comes
+ * from the payment provider's own page.
  */
 export const Route = createFileRoute("/checkout")({
   head: () => ({
@@ -37,8 +54,9 @@ export const Route = createFileRoute("/checkout")({
       { title: "Checkout | N2 Wheels" },
       {
         name: "description",
-        content:
-          "Review your N2 Wheels order and enter UK delivery details. Online card payment is not yet switched on — orders are confirmed with our team by email.",
+        content: canTakeOnlinePayment()
+          ? "Review your N2 Wheels order and enter UK delivery details, then pay on our payment provider's own secure page. All catalogue data is sample data."
+          : "Review your N2 Wheels order and enter UK delivery details. Online card payment is not yet switched on — orders are confirmed with our team by email.",
       },
       { name: "robots", content: "noindex, nofollow" },
     ],
@@ -53,8 +71,9 @@ function CheckoutPage() {
   const [outcome, setOutcome] = useState<CheckoutOutcome | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Resolved from the build env: with nothing configured this is the honest
-  // email-handoff provider (see the module docblock in src/lib/checkout.ts).
+  // Resolved from the build env: with a checkout URL configured this is the
+  // registered hosted-checkout provider; with nothing configured it is the
+  // honest email-handoff provider (see src/lib/checkout.ts).
   const provider = getCheckoutProvider();
   const order = useMemo(() => orderFromBasket(lines), [lines]);
 
@@ -77,12 +96,16 @@ function CheckoutPage() {
       setErrors({});
       if (typeof window === "undefined") return;
       if (result.status === "redirect") {
-        // Hand the browser to the provider's own hosted checkout page.
-        window.location.assign(result.url);
-      } else {
-        // Handoff: open the customer's mail client with the prepared enquiry.
-        window.location.href = result.mailtoHref;
+        // The redirect outcome is shown to the customer (see PaymentNotice):
+        // this page deliberately does NOT yank the browser to the payment
+        // provider on submit, so the honest note from the provider config — the
+        // catalogue is sample data and the connected page charges a fixed demo
+        // amount, not the basket total — is read here, and the customer makes
+        // the final click themselves.
+        return;
       }
+      // Handoff: open the customer's mail client with the prepared enquiry.
+      window.location.href = result.mailtoHref;
     } finally {
       setSubmitting(false);
     }
@@ -96,14 +119,15 @@ function CheckoutPage() {
           Checkout
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-steel">
-          Enter your UK delivery details and we will confirm availability, the
-          exact fitment for your vehicle, delivery and payment with you. All
-          catalogue items are sample data — no live stock is claimed.
+          {provider.canTakePayment
+            ? "Enter your UK delivery details, then complete the payment on our payment provider's own secure page. We confirm availability, the exact fitment for your vehicle and delivery with you directly. All catalogue items are sample data — no live stock is claimed."
+            : "Enter your UK delivery details and we will confirm availability, the exact fitment for your vehicle, delivery and payment with you. All catalogue items are sample data — no live stock is claimed."}
         </p>
 
         <PaymentNotice
           canTakePayment={provider.canTakePayment}
           label={provider.label}
+          amountNote={provider.amountNote}
           outcome={outcome}
         />
 
@@ -232,7 +256,9 @@ function CheckoutPage() {
                 </div>
               </div>
               <OrderTotals lines={lines} className="mt-4" />
-              <EmailPreview lines={lines} customer={customer} />
+              {!provider.canTakePayment && (
+                <EmailPreview lines={lines} customer={customer} />
+              )}
             </div>
           </div>
         )}
@@ -245,20 +271,43 @@ function CheckoutPage() {
 function PaymentNotice({
   canTakePayment,
   label,
+  amountNote,
   outcome,
 }: {
   canTakePayment: boolean;
   label: string;
+  /** Honest note from the active provider's config (see checkout.ts). */
+  amountNote?: string;
   outcome: CheckoutOutcome | null;
 }) {
   return (
     <div className="mt-8 rounded-xl border border-race/30 bg-race/5 p-5">
       <p className="text-sm font-bold text-white">Payment provider: {label}</p>
       {canTakePayment ? (
-        <p className="mt-1.5 text-sm leading-relaxed text-steel">
-          Continuing will take you to our payment provider&apos;s own secure
-          checkout page to pay. No card details are entered on this website.
-        </p>
+        <>
+          <p className="mt-1.5 text-sm leading-relaxed text-steel">
+            Continuing will take you to our payment provider&apos;s own secure
+            checkout page to pay. No card details are entered on this website.
+          </p>
+          {amountNote ? (
+            <p
+              data-demo-payment-note="true"
+              className="mt-3 rounded-lg border border-white/10 bg-night/70 p-3.5 text-sm leading-relaxed text-white"
+            >
+              {amountNote}
+            </p>
+          ) : null}
+          <p className="mt-3 text-sm leading-relaxed text-steel">
+            Questions about fitment, delivery or an order? Email our team at{" "}
+            <a
+              className="font-semibold text-white underline underline-offset-2"
+              href={`mailto:${CHECKOUT_EMAIL}`}
+            >
+              {CHECKOUT_EMAIL}
+            </a>{" "}
+            — we confirm availability and fitment before anything is despatched.
+          </p>
+        </>
       ) : (
         <p className="mt-1.5 text-sm leading-relaxed text-steel">
           This site is not able to take online card payments yet, so no payment
@@ -289,8 +338,10 @@ function PaymentNotice({
       )}
       {outcome?.status === "redirect" && (
         <p role="status" className="mt-3 text-sm leading-relaxed text-white">
-          Taking you to our payment provider&apos;s secure page now. If nothing
-          happens,{" "}
+          Your details are ready. Nothing has been paid or ordered yet — this
+          page has not placed an order, and any confirmation comes from the
+          payment provider. Continue on our payment provider&apos;s own secure
+          page:{" "}
           <a
             className="font-semibold underline underline-offset-2"
             href={outcome.url}

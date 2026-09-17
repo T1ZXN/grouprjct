@@ -338,11 +338,12 @@ SSR handler, recopies assets/images and rewrites the preview host to
   provider key: it is server-side code (never served as a static file) and it
   logs neither the key nor the plate. With no key inlined it answers an honest
   503 and never calls the provider.
-- No checkout/payment functionality is included — payment stays off until real
-  credentials exist. (The basket and /checkout pages ARE exported, but they take
-  no payment: with no payment provider configured, checkout hands the customer
-  to an email enquiry and says so plainly. No success screen or order number
-  exists anywhere in the export.)
+- Checkout never takes card details and never claims an order: the only
+  outcomes are "redirect" (to a configured hosted-checkout page — the connected
+  Stripe Payment Link, set by build config, never committed to the repo),
+  "invalid" and "handoff". With no checkout URL configured, /checkout hands the
+  customer to an email enquiry and says so plainly. No success screen, order
+  number or payment confirmation exists anywhere in the export.
 `,
     "utf8"
   );

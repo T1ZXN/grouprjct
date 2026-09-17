@@ -9,6 +9,16 @@ import {
 } from "~/lib/basket";
 import type { BasketLine } from "~/lib/basket";
 import { formatGBP } from "~/lib/pricing";
+import { canTakeOnlinePayment } from "~/lib/checkout";
+import { registerStripeCheckoutProvider } from "~/lib/checkout-stripe";
+
+/**
+ * Register the live hosted-checkout provider (Stripe Payment Link) when the
+ * build environment configures one — exactly as /checkout does — so this page's
+ * payment message matches what checkout will really do. With no
+ * `VITE_CHECKOUT_URL` this is a no-op and the honest email-handoff copy stays.
+ */
+registerStripeCheckoutProvider();
 
 /**
  * /basket — the customer's own list.
@@ -16,8 +26,9 @@ import { formatGBP } from "~/lib/pricing";
  * Line items show exactly what the product page showed (name, spec, unit price
  * inc. VAT); totals come from the settings-driven basket maths
  * (src/lib/basket.ts). Nothing here claims stock, availability or a completed
- * order — the panel below the totals says plainly that this site cannot take an
- * online card payment yet.
+ * order — the panel below the totals says plainly where payment happens: on the
+ * payment provider's own secure page when a hosted checkout is configured,
+ * otherwise that this site prepares an email enquiry instead.
  */
 export const Route = createFileRoute("/basket")({
   head: () => ({
@@ -37,6 +48,9 @@ export const Route = createFileRoute("/basket")({
 
 function BasketPage() {
   const { lines, count, hydrated, setQuantity, remove, clear } = useBasket();
+  // Build-config driven (see src/lib/checkout-stripe.ts): true only when a
+  // hosted checkout URL is configured for this build.
+  const canPay = canTakeOnlinePayment();
 
   return (
     <section className="border-t border-line bg-night">
@@ -96,13 +110,26 @@ function BasketPage() {
               <OrderTotals lines={lines} />
               <div className="mt-4 rounded-xl border border-race/30 bg-race/5 p-4">
                 <p className="text-sm font-semibold text-white">
-                  No online payment yet
+                  {canPay
+                    ? "Secure card payment"
+                    : "No online payment yet"}
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed text-steel">
-                  This site is not able to take card payments online, so
-                  checkout prepares your order as an email to our team instead —
-                  we confirm availability, delivery and payment with you
-                  directly.
+                  {canPay ? (
+                    <>
+                      Continue to checkout to enter your UK delivery details,
+                      then pay on our payment provider&apos;s own secure page.
+                      Every catalogue item is sample data and we check your order
+                      against your exact vehicle before we confirm it.
+                    </>
+                  ) : (
+                    <>
+                      This site is not able to take card payments online, so
+                      checkout prepares your order as an email to our team
+                      instead — we confirm availability, delivery and payment
+                      with you directly.
+                    </>
+                  )}
                 </p>
                 <Link to="/checkout" className="btn btn-red mt-4 w-full">
                   Continue to checkout

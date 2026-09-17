@@ -16,6 +16,7 @@ import {
   canTakeOnlinePayment,
   CHECKOUT_URL_ENV_KEY,
   createRedirectProvider,
+  DEMO_CHECKOUT_AMOUNT_NOTE,
   enquiryProvider,
   ENQUIRY_NOTICE,
   ENQUIRY_PROVIDER_ID,
@@ -32,6 +33,13 @@ import {
 import type { CheckoutCustomer, CheckoutOutcome } from "../src/lib/checkout";
 import { addToBasket } from "../src/lib/basket";
 import type { BasketLine } from "../src/lib/basket";
+import {
+  registerStripeCheckoutProvider,
+  STRIPE_PROVIDER_ENV_KEY,
+  STRIPE_PROVIDER_ID,
+  STRIPE_PROVIDER_LABEL,
+  stripeCheckoutProvider,
+} from "../src/lib/checkout-stripe";
 import { demoAccessories, demoTypes, demoWheels } from "../src/data/products";
 
 let pass = 0;
@@ -381,6 +389,199 @@ check(
     ? viaModule.status === "handoff"
     : viaModule.status === "redirect",
   viaModule.status,
+);
+
+console.log("checkout — the LIVE hosted-checkout provider (Stripe Payment Link)");
+/**
+ * The activation path that ships today: `VITE_CHECKOUT_URL` (build config, read
+ * from .env when the suite runs through bun) points at the connected Stripe
+ * Payment Link, and the checkout route registers that provider on load. The
+ * tests below prove the CONFIGURATION activates it and that the basket/amount
+ * honesty travels with it — without asserting on any committed URL (the link is
+ * config, never source).
+ */
+const ambientCheckoutUrl =
+  String(
+    (import.meta as { env?: Record<string, string> }).env?.[
+      CHECKOUT_URL_ENV_KEY
+    ] ?? "",
+  ).trim() || "https://pay.example.test/stripe-link-not-configured";
+const liveLink = ambientCheckoutUrl;
+check(
+  "a registered hosted-checkout provider joins the seam when the env var is set",
+  registerStripeCheckoutProvider({ [STRIPE_PROVIDER_ENV_KEY]: liveLink }) ===
+    true &&
+    registeredCheckoutProviderIds().includes(STRIPE_PROVIDER_ID),
+);
+check(
+  "with VITE_CHECKOUT_URL set, getCheckoutProvider() returns a payment-capable provider",
+  getCheckoutProvider({ [CHECKOUT_URL_ENV_KEY]: liveLink }).canTakePayment ===
+    true &&
+    canTakeOnlinePayment({ [CHECKOUT_URL_ENV_KEY]: liveLink }) === true,
+);
+const liveProvider = getCheckoutProvider({ [CHECKOUT_URL_ENV_KEY]: liveLink });
+check(
+  "the active provider is the registered Stripe hosted-checkout provider",
+  liveProvider.id === STRIPE_PROVIDER_ID,
+  liveProvider.id,
+);
+check(
+  "its label comes from the provider config and names the provider",
+  liveProvider.label === STRIPE_PROVIDER_LABEL &&
+    /stripe/i.test(liveProvider.label),
+  liveProvider.label,
+);
+check(
+  "the active provider carries the honest demo amount note from its config",
+  liveProvider.amountNote === DEMO_CHECKOUT_AMOUNT_NOTE &&
+    Boolean(liveProvider.amountNote),
+);
+const note = liveProvider.amountNote ?? "";
+check(
+  "the note states the basket is sample (demo) data",
+  /sample \(demo\) data/i.test(note),
+  note.slice(0, 60),
+);
+check(
+  "the note states the connected checkout is a FIXED £1.00 test payment",
+  /fixed £1\.00 test payment/i.test(note),
+);
+check(
+  "the note says the £1.00 is NOT the basket total shown",
+  /not the basket total/i.test(note),
+);
+check(
+  "the note points at the payment provider's own page for confirmation",
+  /payment provider's own secure page/i.test(note),
+);
+check(
+  "the note promises no order number, no receipt and no order from this site",
+  /no order number and no receipt/i.test(note) &&
+    /does not place or confirm an order/i.test(note),
+);
+check(
+  "the note claims nothing about delivery, guarantees or fitment",
+  !/guarantee|free delivery|confirmed order|will be shipped|despatched/i.test(
+    note,
+  ),
+);
+const liveOutcome = await liveProvider.startCheckout({ order, customer });
+check(
+  "startCheckout returns a redirect (never a success screen)",
+  liveOutcome.status === "redirect",
+  liveOutcome.status,
+);
+if (liveOutcome.status === "redirect") {
+  check(
+    "the redirect target is exactly the configured checkout URL",
+    liveOutcome.url === liveLink,
+    liveOutcome.url,
+  );
+  check(
+    "the redirect notice says the customer leaves this site to pay",
+    /provider's secure checkout page/i.test(liveOutcome.notice),
+  );
+  check(
+    "the redirect outcome carries no order/payment reference",
+    !/order\s*(number|ref)#|ORD-|paymentReference|"success"/i.test(
+      JSON.stringify(liveOutcome),
+    ),
+  );
+  check(
+    "the redirect outcome carries the honest demo amount note itself (not only the provider)",
+    liveOutcome.amountNote === DEMO_CHECKOUT_AMOUNT_NOTE,
+    String(liveOutcome.amountNote ?? "").slice(0, 48),
+  );
+}
+const silentRedirect = await createRedirectProvider({
+  id: "no-note",
+  label: "No note configured",
+  checkoutUrl: "https://pay.example.test/s/9",
+}).startCheckout({ order, customer });
+check(
+  "a provider configured without an amount note invents none",
+  silentRedirect.status === "redirect" && !("amountNote" in silentRedirect),
+  JSON.stringify(Object.keys(silentRedirect)),
+);
+const liveInvalid = await liveProvider.startCheckout({
+  order,
+  customer: { ...customer, postcode: "nope" },
+});
+check(
+  "the live provider still refuses invalid details (no redirect to pay)",
+  liveInvalid.status === "invalid" && !("url" in liveInvalid),
+  liveInvalid.status,
+);
+check(
+  "an empty basket cannot reach the live payment page either",
+  (
+    await liveProvider.startCheckout({ order: emptyOrder, customer })
+  ).status === "invalid",
+);
+// The ambient path — exactly what /checkout does on this machine: the module
+// registers from the build env and startCheckout() follows it.
+const ambientRegistered = registerStripeCheckoutProvider();
+const ambientOutcome = await startCheckout({ order, customer });
+check(
+  ambientCheckoutUrl.startsWith("https://pay.example.test")
+    ? "with no ambient config, startCheckout() still hands off (honest email path)"
+    : "with the ambient config, startCheckout() redirects to the payment provider",
+  ambientCheckoutUrl.startsWith("https://pay.example.test")
+    ? ambientOutcome.status === "handoff"
+    : ambientOutcome.status === "redirect" &&
+        ambientRegistered === true &&
+        "url" in ambientOutcome &&
+        ambientOutcome.url === ambientCheckoutUrl,
+  ambientOutcome.status,
+);
+check(
+  "with no configuration at all the seam stays on the honest email handoff",
+  getCheckoutProvider({}).id === ENQUIRY_PROVIDER_ID &&
+    stripeCheckoutProvider({}) === null &&
+    registerStripeCheckoutProvider({}) === false,
+);
+check(
+  "the payment link is build configuration, never committed source",
+  !/buy\.stripe\.com|https?:\/\//i.test(
+    readFileSync(
+      new URL("../src/lib/checkout-stripe.ts", import.meta.url),
+      "utf8",
+    ),
+  ),
+);
+const checkoutPageWithNote = readFileSync(
+  new URL("../src/routes/checkout.tsx", import.meta.url),
+  "utf8",
+);
+check(
+  "the page renders the note from provider config (the amount is not hardcoded)",
+  /provider\.amountNote/.test(checkoutPageWithNote) &&
+    !/£1\.00/.test(checkoutPageWithNote),
+);
+check(
+  "the page shows the redirect outcome to the customer (no silent navigation away)",
+  !/location\.assign|location\.replace|location\.href\s*=\s*result\.url/.test(
+    checkoutPageWithNote,
+  ),
+);
+check(
+  "the redirect outcome offers the provider's own URL as a deliberate link",
+  /href=\{outcome\.url\}/.test(checkoutPageWithNote) &&
+    /continue to payment/.test(checkoutPageWithNote),
+);
+const basketPageWithPay = readFileSync(
+  new URL("../src/routes/basket.tsx", import.meta.url),
+  "utf8",
+);
+check(
+  "the basket page's payment message follows the configured provider",
+  /registerStripeCheckoutProvider\(\)/.test(basketPageWithPay) &&
+    /canTakeOnlinePayment\(\)/.test(basketPageWithPay),
+);
+check(
+  "the basket page keeps the honest no-payment copy for an unconfigured build",
+  /"No online payment yet"/.test(basketPageWithPay) &&
+    /not able to take card payments online/.test(basketPageWithPay),
 );
 
 console.log("checkout — order summary");
