@@ -13,6 +13,8 @@
     "test:supabase": "bun ./scripts/test-supabase.ts",
     "test:supabase-import": "bun ./scripts/test-supabase-import.ts",
     "test:excel-import": "bun ./scripts/test-excel-import.ts",
+    "test:basket": "bun ./scripts/test-basket.ts",
+    "test:checkout": "bun ./scripts/test-checkout.ts",
     "format": "prettier --write .",
     "test:reglookup": "bun ./scripts/test-reglookup.ts"
   },

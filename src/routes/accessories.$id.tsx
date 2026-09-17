@@ -5,13 +5,17 @@ import { DEMO_NOTICE, demoAccessories } from "~/data/products";
 import type { Accessory } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
 import { useLiveProduct } from "~/lib/liveCatalogue";
+import { AddToBasket } from "~/components/AddToBasket";
 
 export const Route = createFileRoute("/accessories/$id")({
-  loader: ({ params }) => demoAccessories.find((a) => a.id === params.id) ?? null,
+  loader: ({ params }) =>
+    demoAccessories.find((a) => a.id === params.id) ?? null,
   head: ({ loaderData }) => ({
     meta: [
       {
-        title: loaderData ? `${loaderData.name} — N2 Wheels` : "Accessory not found | N2 Wheels",
+        title: loaderData
+          ? `${loaderData.name} — N2 Wheels`
+          : "Accessory not found | N2 Wheels",
       },
       {
         name: "description",
@@ -33,7 +37,7 @@ function AccessoryDetailPage() {
   const live = useLiveProduct<Accessory>(params.id, "accessories");
   const accessory = live ?? sample;
   if (!accessory) return <AccessoryNotFound />;
-  return <AccessoryDetail accessory={ accessory } />;
+  return <AccessoryDetail accessory={accessory} />;
 }
 
 function AccessoryDetail({ accessory }: { accessory: Accessory }) {
@@ -67,19 +71,27 @@ function AccessoryDetail({ accessory }: { accessory: Accessory }) {
             </h1>
 
             <div className="mt-5 flex flex-wrap items-center gap-4">
-              <p className="text-3xl font-bold text-white">{formatGBP(accessory.retailPriceIncVat)}</p>
+              <p className="text-3xl font-bold text-white">
+                {formatGBP(accessory.retailPriceIncVat)}
+              </p>
               <StockChip status={accessory.stockStatus} />
             </div>
-            <p className="mt-1 text-xs text-steel-dim">Price includes UK VAT at 20%.</p>
+            <p className="mt-1 text-xs text-steel-dim">
+              Price includes UK VAT at 20%.
+            </p>
 
-            <p className="mt-5 text-sm leading-relaxed text-steel">{accessory.description}</p>
+            <p className="mt-5 text-sm leading-relaxed text-steel">
+              {accessory.description}
+            </p>
 
             <div className="mt-5 rounded-lg border border-race/30 bg-race/5 p-4 text-sm leading-relaxed text-steel">
-              Check thread size, seat type and fitment details with our team before ordering —
-              we verify compatibility with your exact wheel and vehicle before confirming any order.
+              Check thread size, seat type and fitment details with our team
+              before ordering — we verify compatibility with your exact wheel
+              and vehicle before confirming any order.
             </div>
 
-            <Link to="/accessories" className="btn btn-red mt-6">
+            <AddToBasket product={accessory} />
+            <Link to="/accessories" className="btn btn-outline mt-3">
               Browse Accessories
             </Link>
           </div>
@@ -91,7 +103,10 @@ function AccessoryDetail({ accessory }: { accessory: Accessory }) {
             rows={[
               { label: "Brand", value: accessory.brand },
               { label: "Type", value: "Wheel accessory" },
-              { label: "Price inc. VAT", value: formatGBP(accessory.retailPriceIncVat) },
+              {
+                label: "Price inc. VAT",
+                value: formatGBP(accessory.retailPriceIncVat),
+              },
             ]}
           />
           <p className="mt-5 text-xs text-steel-dim">{DEMO_NOTICE}</p>
@@ -110,8 +125,8 @@ function AccessoryNotFound() {
           Accessory not found
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-steel sm:text-base">
-          That accessory isn&apos;t in the sample catalogue — it may be part of a future feed
-          update.
+          That accessory isn&apos;t in the sample catalogue — it may be part of
+          a future feed update.
         </p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <Link to="/accessories" className="btn btn-outline">

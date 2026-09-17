@@ -2,10 +2,16 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Breadcrumb, SpecTable } from "~/components/SpecTable";
 import { StockChip } from "~/components/ProductCard";
 import { FitmentChecker } from "~/components/FitmentChecker";
-import { DEMO_NOTICE, demoPackages, tyreSizeLabel, wheelSizeLabel } from "~/data/products";
+import {
+  DEMO_NOTICE,
+  demoPackages,
+  tyreSizeLabel,
+  wheelSizeLabel,
+} from "~/data/products";
 import type { WheelPackage } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
 import { useLiveProduct } from "~/lib/liveCatalogue";
+import { AddToBasket } from "~/components/AddToBasket";
 
 export const Route = createFileRoute("/packages/$id")({
   loader: ({ params }) => demoPackages.find((p) => p.id === params.id) ?? null,
@@ -36,13 +42,13 @@ function PackageDetailPage() {
   const live = useLiveProduct<WheelPackage>(params.id, "packages");
   const pkg = live ?? sample;
   if (!pkg) return <PackageNotFound />;
-  return <PackageDetail pkg={ pkg } />;
+  return <PackageDetail pkg={pkg} />;
 }
 
 function PackageDetail({ pkg }: { pkg: WheelPackage }) {
   const tyreLine = pkg.tyreSpec
     ? `${pkg.tyreSpec.brand} ${pkg.tyreSpec.model} — ${tyreSizeLabel(pkg.tyreSpec)}`
-    : pkg.includes.find((l) => /tyre/i.test(l)) ?? "—";
+    : (pkg.includes.find((l) => /tyre/i.test(l)) ?? "—");
 
   return (
     <section className="border-t border-line bg-night">
@@ -72,16 +78,23 @@ function PackageDetail({ pkg }: { pkg: WheelPackage }) {
               {pkg.name}
             </h1>
             <div className="mt-5 flex flex-wrap items-center gap-4">
-              <p className="text-3xl font-bold text-white">{formatGBP(pkg.retailPriceIncVat)}</p>
+              <p className="text-3xl font-bold text-white">
+                {formatGBP(pkg.retailPriceIncVat)}
+              </p>
               <StockChip status={pkg.stockStatus} />
             </div>
-            <p className="mt-1 text-xs text-steel-dim">Price includes UK VAT at 20%.</p>
-            <p className="mt-5 text-sm leading-relaxed text-steel">{pkg.description}</p>
+            <p className="mt-1 text-xs text-steel-dim">
+              Price includes UK VAT at 20%.
+            </p>
+            <p className="mt-5 text-sm leading-relaxed text-steel">
+              {pkg.description}
+            </p>
             <div className="mt-5 rounded-lg border border-race/30 bg-race/5 p-4 text-sm leading-relaxed text-steel">
-              Package contents are fixed sample sets — we verify the complete fitment for your
-              exact vehicle before confirming any order.
+              Package contents are fixed sample sets — we verify the complete
+              fitment for your exact vehicle before confirming any order.
             </div>
-            <Link to="/packages" className="btn btn-red mt-6">
+            <AddToBasket product={pkg} />
+            <Link to="/packages" className="btn btn-outline mt-3">
               Browse Packages
             </Link>
           </div>
@@ -117,15 +130,19 @@ function PackageDetail({ pkg }: { pkg: WheelPackage }) {
                   </ul>
                 ),
               },
-              { label: "Price inc. VAT", value: formatGBP(pkg.retailPriceIncVat) },
+              {
+                label: "Price inc. VAT",
+                value: formatGBP(pkg.retailPriceIncVat),
+              },
             ]}
           />
           <div className="flex flex-col gap-6">
             <div className="rounded-lg border border-white/10 bg-coal p-4 text-xs leading-relaxed text-steel-dim">
               <p>
-                *Sample package detail — these are demo packages and we don&apos;t currently
-                operate a fitting service. Fitting, balancing and any fitting charges are
-                confirmed with you before any order is placed.
+                *Sample package detail — these are demo packages and we
+                don&apos;t currently operate a fitting service. Fitting,
+                balancing and any fitting charges are confirmed with you before
+                any order is placed.
               </p>
               <p className="mt-3">{DEMO_NOTICE}</p>
             </div>
@@ -149,7 +166,8 @@ function PackageNotFound() {
           Package not found
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-steel sm:text-base">
-          That package isn&apos;t in the sample catalogue — it may be part of a future feed update.
+          That package isn&apos;t in the sample catalogue — it may be part of a
+          future feed update.
         </p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <Link to="/packages" className="btn btn-outline">

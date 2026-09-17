@@ -79,10 +79,28 @@ browser session limits the cost of a leaked browser-side key.
 The site builds and runs with NO `.env` file at all — missing keys simply mean
 demo mode.
 
+## Basket & checkout (payment seam)
+- `src/lib/basket.ts` — basket model: lines, quantities and settings-driven order
+  totals (delivery tiers, VAT already inside the displayed prices).
+- `src/components/BasketProvider.tsx` — client basket state, persisted in
+  localStorage (`n2wheels.basket.v1`); the header badge and product pages use it.
+- `/basket` — line items, quantity controls, delivery/VAT/total panel.
+- `/checkout` — order summary + UK delivery/contact form. **No card fields exist
+  on this page** and it can never show a success screen or an order number.
+- `src/lib/checkout.ts` — the payment seam (same pattern as `reglookup.ts`).
+  With nothing configured it uses `enquiryProvider`, which hands the order to
+  `enquiry@n2wheels.co.uk` as a prepared email and says plainly that the site
+  takes no online card payment yet. A hosted checkout URL supplied at build time
+  (`VITE_CHECKOUT_URL`) activates a redirect provider instead — see the
+  docblock for how a real provider is wired; no credential is invented here.
+- Tests: `bun run test:basket`, `bun run test:checkout`.
+
 ## Status
 MVP with labelled sample/demo products — no real stock or availability is
-claimed, and compatibility is verified before any order is confirmed. Payment
-checkout, UK registration-lookup API and the Forzza supplier feed (CSV/XML/XLS)
-hook in behind the structures already built here.
+claimed, and compatibility is verified before any order is confirmed. Basket and
+checkout are built behind the honest payment seam above (no online card payment
+is taken until a real provider is configured), and the UK registration-lookup API
+and the Forzza supplier feed (CSV/XML/XLS) hook in behind the structures already
+built here.
 
 Contact: enquiry@n2wheels.co.uk
