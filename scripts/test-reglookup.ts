@@ -4,15 +4,21 @@
  *
  * Covers, with NO network calls and NO API keys:
  *   1. shape mapping   — documented reg payload -> Vehicle; documented fits payload -> FitmentOption[]
- *   2. live-mode gating — no key = demo mode; VITE_REG_LOOKUP_KEY or VITE_FITS_API_KEY = live mode
- *                        (gating is checked in real child processes, so it exercises the real seam)
+ *   2. live-mode gating — nothing configured = demo mode; a proxy build flag or a keyed
+ *                        direct override = live mode (gating is checked in real child
+ *                        processes, so it exercises the real seam)
  *   3. error honesty   — 5xx / unreachable / unreadable payloads throw honest errors and NEVER
  *                        return a fabricated vehicle or fitment; 404 -> honest "no-match" with no vehicle
- *   4. demo honesty    — with no key, a plate is never turned into a vehicle and plate input is still validated
- *   5. live endpoint   — real VehicleMatic base URL, the X-VEHICLEMATIC-KEY default (bearer / x-api-key
- *                        still selectable), and 402/403/422 mapped to distinct honest messages
+ *   4. demo honesty    — with nothing configured, a plate is never turned into a vehicle and plate
+ *                        input is still validated
+ *   5. live endpoint   — the same-origin proxy path is the default, the direct VehicleMatic
+ *                        endpoint + X-VEHICLEMATIC-KEY are still reachable via the explicit
+ *                        VITE_REG_LOOKUP_URL override, and 402/403/422 map to distinct honest messages
+ *   6. proxy function  — the server-side same-origin proxy (scripts/reglookup-function.js):
+ *                        upstream status mirroring, honest failures, key never logged and never
+ *                        returned, no key committed in the template
  *
- * No network calls and no real API keys: every provider test injects its transport, and the
+ * No network calls and no real API keys: every provider/handler test injects its transport, and the
  * demo-mode checks run in a child process with the key blanked (the ambient shell may hold a
  * live key, which must never leak into a test or be printed).
  *
@@ -24,7 +30,15 @@ import {
   isLiveMode,
   lookupVehicleByReg,
 } from "../src/lib/reglookup";
-import { createUkVrmProvider, DEFAULT_UK_VRM_BASE_URL, mapVehicleFromPayload } from "../src/lib/reglookup-ukvrm";
+import {
+  createUkVrmProvider,
+  DEFAULT_UK_VRM_BASE_URL,
+  DEFAULT_UK_VRM_PROXY_PATH,
+  endpointCandidates,
+  mapVehicleFromPayload,
+  REG_LOOKUP_FUNCTION_FALLBACK_PATH,
+  VEHICLEMATIC_DIRECT_BASE_URL,
+} from "../src/lib/reglookup-ukvrm";
 import { createFitsProvider, mapFitmentOptions } from "../src/lib/reglookup-fits";
 import { createLiveProvider, LIVE_PROVIDER_ID } from "../src/lib/reglookup-live";
 
@@ -105,11 +119,27 @@ check("fits option parsed from the rim string when fields are absent", mapFitmen
 check("empty fits payload -> no options", mapFitmentOptions({ data: [] }).length === 0);
 
 console.log("== 2. live-mode gating (real child processes) ==");
+/**
+ * Every child starts from a NEUTRAL env (no ambient key, no ambient proxy flag,
+ * no ambient URL override) and then applies the case's own vars — so a live key
+ * sitting in the shell can never decide what "nothing configured" means.
+ */
+function childEnv(env: Record<string, string>): Record<string, string> {
+  return {
+    ...process.env,
+    VITE_REG_LOOKUP_KEY: "",
+    // The proxy build is the default; "0" is the explicit labelled-demo switch.
+    VITE_REG_LOOKUP_PROXY: "0",
+    VITE_REG_LOOKUP_URL: "",
+    VITE_FITS_API_KEY: "",
+    ...env,
+  };
+}
 function gate(env: Record<string, string>) {
   const snippet = `import {getActiveProvider,isLiveMode,getProviderLabel,lookupVehicleByReg} from "${SITE}/src/lib/reglookup.ts";
 const p=getActiveProvider();let o;try{o=await lookupVehicleByReg("AB12CDE");}catch(e){console.log(JSON.stringify({id:p.id,live:isLiveMode(),label:getProviderLabel(),status:"threw",hasVehicle:false,error:String(e&&e.message||e).slice(0,60)}));process.exit(0);}
 console.log(JSON.stringify({id:p.id,live:isLiveMode(),label:getProviderLabel(),status:o.status,hasVehicle:Boolean(o.vehicle)}));`;
-  const proc = Bun.spawnSync({ cmd: ["bun", "-e", snippet], env: { ...process.env, ...env }, cwd: SITE });
+  const proc = Bun.spawnSync({ cmd: ["bun", "-e", snippet], env: childEnv(env), cwd: SITE });
   const line = proc.stdout.toString().trim().split("\n").pop() ?? "";
   try {
     return JSON.parse(line) as { id: string; live: boolean; label: string; status: string; hasVehicle: boolean };
@@ -121,7 +151,7 @@ console.log(JSON.stringify({id:p.id,live:isLiveMode(),label:getProviderLabel(),s
  * Run a plate lookup through the REAL seam in a child process with a controlled
  * env, and return the outcome. The demo-mode assertions need this: VITE_REG_LOOKUP_KEY
  * is a platform secret, so the shell running these tests may already carry a live key
- * (with live mode active the in-process call would hit the real provider, and "demo mode"
+ * (with live mode active the in-process call would go to the proxy, and "demo mode"
  * would no longer describe what actually happened). No key is ever printed — the child
  * reports only the provider id, status, notices and the normalised registration.
  */
@@ -129,7 +159,7 @@ function seamOutcome(env: Record<string, string>) {
   const snippet = `import {getActiveProvider,isLiveMode,lookupVehicleByReg} from "${SITE}/src/lib/reglookup.ts";
 let o;try{o=await lookupVehicleByReg("AB12 CDE");}catch(e){console.log(JSON.stringify({threw:true,id:getActiveProvider().id,live:isLiveMode(),status:"threw",hasVehicle:false,notice:"",registration:""}));process.exit(0);}
 console.log(JSON.stringify({threw:false,id:getActiveProvider().id,live:isLiveMode(),status:o.status,hasVehicle:Boolean(o.vehicle),notice:o.notice,registration:o.registration}));`;
-  const proc = Bun.spawnSync({ cmd: ["bun", "-e", snippet], env: { ...process.env, ...env }, cwd: SITE });
+  const proc = Bun.spawnSync({ cmd: ["bun", "-e", snippet], env: childEnv(env), cwd: SITE });
   const line = proc.stdout.toString().trim().split("\n").pop() ?? "";
   try {
     return JSON.parse(line) as {
@@ -140,12 +170,19 @@ console.log(JSON.stringify({threw:false,id:getActiveProvider().id,live:isLiveMod
     return { threw: true, id: "ERROR", live: false, status: "error", hasVehicle: false, notice: proc.stderr.toString().slice(0, 200), registration: "" };
   }
 }
-const noKey = gate({ VITE_REG_LOOKUP_KEY: "", VITE_FITS_API_KEY: "" });
-check("no key -> demo provider", noKey.id === "demo" && noKey.live === false, JSON.stringify(noKey));
-check("no key -> plate lookup unavailable, NO fabricated vehicle", noKey.status === "unavailable" && noKey.hasVehicle === false, JSON.stringify(noKey));
+const noKey = gate({ VITE_REG_LOOKUP_PROXY: "0" });
+check("VITE_REG_LOOKUP_PROXY=0 -> demo provider (labelled demo build)", noKey.id === "demo" && noKey.live === false, JSON.stringify(noKey));
+check("demo build -> plate lookup unavailable, NO fabricated vehicle", noKey.status === "unavailable" && noKey.hasVehicle === false, JSON.stringify(noKey));
 
-const regKey = gate({ VITE_REG_LOOKUP_KEY: "test-key-not-real", VITE_FITS_API_KEY: "" });
-check("VITE_REG_LOOKUP_KEY -> live provider", regKey.id === LIVE_PROVIDER_ID && regKey.live === true, JSON.stringify(regKey));
+// THE PRODUCTION CASE: the build ships the same-origin proxy, so the plate
+// lookup is live with NO key in the client bundle at all.
+const proxyBuild = gate({ VITE_REG_LOOKUP_PROXY: "" });
+check("proxy build (default, no client key at all) -> live provider", proxyBuild.id === LIVE_PROVIDER_ID && proxyBuild.live === true, JSON.stringify(proxyBuild));
+check("proxy build -> live label still shown, naming the sample fitment gap", /Live UK registration lookup/i.test(proxyBuild.label) && /sample/i.test(proxyBuild.label), proxyBuild.label);
+check("proxy build -> no fabricated vehicle when the lookup can't complete (no server here)", proxyBuild.hasVehicle === false, JSON.stringify(proxyBuild));
+
+const regKey = gate({ VITE_REG_LOOKUP_PROXY: "0", VITE_REG_LOOKUP_KEY: "test-key-not-real" });
+check("VITE_REG_LOOKUP_KEY (direct override) -> live provider", regKey.id === LIVE_PROVIDER_ID && regKey.live === true, JSON.stringify(regKey));
 check("reg-only label names the sample fitment gap", /sample/i.test(regKey.label), regKey.label);
 check("reg-only: no fabricated vehicle when the live call fails", regKey.hasVehicle === false, JSON.stringify(regKey));
 
@@ -180,46 +217,47 @@ await expectThrow("network failure -> honest error", () =>
 await expectThrow("unmappable payload -> honest error, no fabricated vehicle", () =>
   createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(200, { data: { make: "FORD" } }) }).lookupVehicleByReg("AB12CDE"), /don't guess/i);
 await expectThrow("unreadable body -> honest error", () =>
-  createUkVrmProvider({ apiKey: "k", fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new Error("bad json"); } }) as never }).lookupVehicleByReg("AB12CDE"), /couldn't read/i);
+  createUkVrmProvider({ apiKey: "k", baseUrl: VEHICLEMATIC_DIRECT_BASE_URL, fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new Error("bad json"); } }) as never }).lookupVehicleByReg("AB12CDE"), /couldn't read/i);
 const capped = createUkVrmProvider({ apiKey: "k", sessionLimit: 1, fetchImpl: async () => jsonResponse(200, REG_PAYLOAD) });
 await capped.lookupVehicleByReg("AB12CDE");
 await expectThrow("per-session cost cap -> honest pause message", () => capped.lookupVehicleByReg("AB12CDE"), /paused for this session/i);
 check("auth mode x-api-key is honoured", await (async () => {
   let seen = "";
-  const p = createUkVrmProvider({ apiKey: "k2", authMode: "x-api-key", fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  const p = createUkVrmProvider({ apiKey: "k2", authMode: "x-api-key", baseUrl: VEHICLEMATIC_DIRECT_BASE_URL, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
   return /x-api-key/.test(seen) && !/Bearer/.test(seen) && !/X-VEHICLEMATIC-KEY/.test(seen);
 })());
 check("auth mode bearer is still selectable via options", await (async () => {
   let seen = "";
-  const p = createUkVrmProvider({ apiKey: "k2", authMode: "bearer", fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  const p = createUkVrmProvider({ apiKey: "k2", authMode: "bearer", baseUrl: VEHICLEMATIC_DIRECT_BASE_URL, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
   return /Bearer k2/.test(seen) && !/X-VEHICLEMATIC-KEY/.test(seen);
 })());
-check("default auth for this (VehicleMatic) adapter sends X-VEHICLEMATIC-KEY", await (async () => {
+check("default auth for this (VehicleMatic) adapter sends X-VEHICLEMATIC-KEY — on a DIRECT url", await (async () => {
   let seen = "";
-  const p = createUkVrmProvider({ apiKey: "k2", fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  const p = createUkVrmProvider({ apiKey: "k2", baseUrl: VEHICLEMATIC_DIRECT_BASE_URL, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
   return /"X-VEHICLEMATIC-KEY":"k2"/.test(seen) && !/Bearer/.test(seen) && !seen.toLowerCase().includes("x-api-key");
 })());
 check("VITE_REG_LOOKUP_AUTH can still switch the scheme (bearer via env)", await (async () => {
   let seen = "";
-  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "k3", VITE_REG_LOOKUP_AUTH: "bearer" }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "k3", VITE_REG_LOOKUP_AUTH: "bearer", VITE_REG_LOOKUP_URL: VEHICLEMATIC_DIRECT_BASE_URL }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
   return /Bearer k3/.test(seen) && !/X-VEHICLEMATIC-KEY/.test(seen);
 })());
 check("VITE_REG_LOOKUP_AUTH=x-vehiclematic-key also lands on the VehicleMatic header", await (async () => {
   let seen = "";
-  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "k3", VITE_REG_LOOKUP_AUTH: "x-vehiclematic-key" }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
+  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "k3", VITE_REG_LOOKUP_AUTH: "x-vehiclematic-key", VITE_REG_LOOKUP_URL: VEHICLEMATIC_DIRECT_BASE_URL }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers); return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
   return /"X-VEHICLEMATIC-KEY":"k3"/.test(seen);
 })());
-check("default base url is the live VehicleMatic Vehicle Details endpoint", DEFAULT_UK_VRM_BASE_URL === "https://vehiclematic.com/products/vehicle-details/api/live", DEFAULT_UK_VRM_BASE_URL);
-check("default request url = {live base}/{VRM} (no api. subdomain)", await (async () => {
+check("default base url is the SAME-ORIGIN proxy path (key stays server-side)", DEFAULT_UK_VRM_BASE_URL === "/api/reglookup" && DEFAULT_UK_VRM_BASE_URL === DEFAULT_UK_VRM_PROXY_PATH, DEFAULT_UK_VRM_BASE_URL);
+check("the direct VehicleMatic endpoint is still available as an explicit override (no api. subdomain)", VEHICLEMATIC_DIRECT_BASE_URL === "https://vehiclematic.com/products/vehicle-details/api/live" && !/api\.vehiclematic\.com/.test(VEHICLEMATIC_DIRECT_BASE_URL), VEHICLEMATIC_DIRECT_BASE_URL);
+check("direct override request url = {direct base}/{VRM}", await (async () => {
   let url = "";
-  const p = createUkVrmProvider({ apiKey: "k2", fetchImpl: async (u) => { url = u; return jsonResponse(200, REG_PAYLOAD); } });
+  const p = createUkVrmProvider({ apiKey: "k2", baseUrl: VEHICLEMATIC_DIRECT_BASE_URL, fetchImpl: async (u) => { url = u; return jsonResponse(200, REG_PAYLOAD); } });
   await p.lookupVehicleByReg("AB12CDE");
-  return url === `${DEFAULT_UK_VRM_BASE_URL}/AB12CDE` && !/api\.vehiclematic\.com/.test(url);
+  return url === `${VEHICLEMATIC_DIRECT_BASE_URL}/AB12CDE`;
 })());
 check("env override supplies base url without code change", await (async () => {
   let url = "";
@@ -227,6 +265,63 @@ check("env override supplies base url without code change", await (async () => {
   await p.lookupVehicleByReg("AB12CDE");
   return url === "https://example.test/vrm/AB12CDE";
 })());
+
+console.log("== 3b. same-origin proxy transport (injected, no network) ==");
+/** Envelope exactly as the proxy function returns it. */
+const PROXY_OK = { n2proxy: 1, vrm: "AB12CDE", upstreamStatus: 200, ...REG_PAYLOAD };
+check("candidates: proxy path first, then the Netlify function path", (() => {
+  const c = endpointCandidates(DEFAULT_UK_VRM_PROXY_PATH, "AB12CDE");
+  return c.length === 2 && c[0] === "/api/reglookup/AB12CDE" && c[1] === `${REG_LOOKUP_FUNCTION_FALLBACK_PATH}?vrm=AB12CDE`;
+})());
+check("candidates: a direct (absolute) url is tried once only", (() => {
+  const c = endpointCandidates(VEHICLEMATIC_DIRECT_BASE_URL, "AB12CDE");
+  return c.length === 1 && c[0] === `${VEHICLEMATIC_DIRECT_BASE_URL}/AB12CDE`;
+})());
+check("proxy mode needs NO client key: one same-origin call, matched", await (async () => {
+  const calls: string[] = [];
+  const p = createUkVrmProvider({ fetchImpl: async (u) => { calls.push(u); return jsonResponse(200, PROXY_OK); } });
+  const o = await p.lookupVehicleByReg("AB12CDE");
+  return o.status === "matched" && o.vehicle?.make === "FORD" && o.source === "live" && calls.length === 1 && calls[0] === "/api/reglookup/AB12CDE";
+})());
+check("proxy call sends NO provider key header — even when a key sits in the env", await (async () => {
+  let seen = "";
+  const p = createUkVrmProvider({ env: { VITE_REG_LOOKUP_KEY: "must-not-leave-the-browser" }, fetchImpl: async (_u, init) => { seen = JSON.stringify(init?.headers ?? {}); return jsonResponse(200, PROXY_OK); } });
+  await p.lookupVehicleByReg("AB12CDE");
+  return !seen.includes("must-not-leave-the-browser") && !/X-VEHICLEMATIC-KEY|Bearer|x-api-key/i.test(seen);
+})());
+const proxyNoMatch = await createUkVrmProvider({ fetchImpl: async () => jsonResponse(404, { n2proxy: 1, vrm: "AB12CDE", upstreamStatus: 404, error: true, message: "No data found for registration AB12CDE." }) }).lookupVehicleByReg("AB12CDE");
+check("proxy 404 envelope -> honest no-match with NO vehicle", proxyNoMatch.status === "no-match" && !proxyNoMatch.vehicle && /never guess a vehicle/i.test(proxyNoMatch.notice), JSON.stringify(proxyNoMatch));
+await expectThrow("proxy 402 envelope -> distinct honest pause (no raw HTTP code)", () =>
+  createUkVrmProvider({ fetchImpl: async () => jsonResponse(402, { n2proxy: 1, upstreamStatus: 402, error: true, message: "Insufficient credits." }) }).lookupVehicleByReg("AB12CDE"), /paused right now/i);
+await expectThrow("proxy 403 envelope -> distinct honest unavailable (no raw HTTP code)", () =>
+  createUkVrmProvider({ fetchImpl: async () => jsonResponse(403, { n2proxy: 1, upstreamStatus: 403 }) }).lookupVehicleByReg("AB12CDE"), /temporarily unavailable/i);
+await expectThrow("proxy 502 (upstream unreachable) -> honest 'couldn't be reached'", () =>
+  createUkVrmProvider({ fetchImpl: async () => jsonResponse(502, { n2proxy: 1, proxyError: "unreachable" }) }).lookupVehicleByReg("AB12CDE"), /couldn't be reached/i);
+await expectThrow("proxy 503 (no key inlined server-side) -> honest not-configured message", () =>
+  createUkVrmProvider({ fetchImpl: async () => jsonResponse(503, { n2proxy: 1, proxyError: "not_configured" }) }).lookupVehicleByReg("AB12CDE"), /aren't configured on this site yet/i);
+await expectThrow("proxy 429 (rate limited) -> honest pause, no invention", () =>
+  createUkVrmProvider({ fetchImpl: async () => jsonResponse(429, { n2proxy: 1, proxyError: "rate_limited" }) }).lookupVehicleByReg("AB12CDE"), /too many registration lookups/i);
+check("proxy route missing (HTML from the host) -> falls back to the function path and matches", await (async () => {
+  const calls: string[] = [];
+  const p = createUkVrmProvider({
+    fetchImpl: async (u) => {
+      calls.push(u);
+      if (u === "/api/reglookup/AB12CDE") return { ok: true, status: 200, json: async () => { throw new Error("<!doctype html>"); } } as never;
+      return jsonResponse(200, PROXY_OK);
+    },
+  });
+  const o = await p.lookupVehicleByReg("AB12CDE");
+  return o.status === "matched" && o.vehicle?.model === "FIESTA" && calls.length === 2 && calls[1] === `${REG_LOOKUP_FUNCTION_FALLBACK_PATH}?vrm=AB12CDE`;
+})());
+await expectThrow("proxy route missing everywhere -> honest 'service isn't available', never a vehicle", () =>
+  createUkVrmProvider({ fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new Error("<!doctype html>"); } }) as never }).lookupVehicleByReg("AB12CDE"), /isn't available on this site/i);
+await expectThrow("proxy fetch throwing -> honest 'couldn't be reached'", () =>
+  createUkVrmProvider({ fetchImpl: async () => { throw new Error("offline"); } }).lookupVehicleByReg("AB12CDE"), /couldn't be reached/i);
+await expectThrow("proxy returns JSON we can't map -> honest error, no invented vehicle", () =>
+  createUkVrmProvider({ fetchImpl: async () => jsonResponse(200, { n2proxy: 1, upstreamStatus: 200, data: { make: "FORD" } }) }).lookupVehicleByReg("AB12CDE"), /don't guess/i);
+const proxyCapped = createUkVrmProvider({ sessionLimit: 1, fetchImpl: async () => jsonResponse(200, PROXY_OK) });
+await proxyCapped.lookupVehicleByReg("AB12CDE");
+await expectThrow("proxy mode keeps the per-session cost cap", () => proxyCapped.lookupVehicleByReg("AB12CDE"), /paused for this session/i);
 
 const fitsOk = await createFitsProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(200, FITS_PAYLOAD) }).getFitments("Audi", "A3", 2018);
 check("fits 200 -> live options with live notice", fitsOk.source === "live" && fitsOk.options.length === 2 && /licensed fitment database/i.test(fitsOk.notice), JSON.stringify(fitsOk).slice(0, 220));
@@ -250,13 +345,127 @@ check("reg-only composite labels its fitment options as SAMPLE", mixedFits.sourc
 const reglessComposite = await createLiveProvider({ fits: createFitsProvider({ apiKey: "k" }) }).lookupVehicleByReg("AB12CDE");
 check("composite without a reg provider never fabricates a vehicle", reglessComposite.status === "unavailable" && !reglessComposite.vehicle, JSON.stringify(reglessComposite));
 
-// Demo mode is asserted in a child process with the key explicitly blanked, so a key
-// present in the ambient environment can never make this section hit the live provider.
-const demoOutcome = seamOutcome({ VITE_REG_LOOKUP_KEY: "", VITE_FITS_API_KEY: "" });
+// Demo mode is asserted in a child process with the demo switch on and everything else
+// blanked, so nothing in the ambient environment can make this section hit a live provider.
+const demoOutcome = seamOutcome({ VITE_REG_LOOKUP_PROXY: "0" });
 check("demo mode: plate is never turned into a vehicle", demoOutcome.id === "demo" && demoOutcome.status === "unavailable" && !demoOutcome.hasVehicle, JSON.stringify(demoOutcome));
 check("demo mode: honest notice tells the customer to use make/model", /choose your car manually/i.test(demoOutcome.notice), demoOutcome.notice);
 check("demo mode: registration is still normalised/returned", demoOutcome.registration === "AB12CDE", demoOutcome.registration);
 await expectThrow("demo mode: invalid plate input is still rejected", () => lookupVehicleByReg("!!!bad"), /valid UK registration/i);
+
+console.log("== 6. same-origin proxy function (server-side handler, injected transport) ==");
+/** The committed template, loaded exactly as the export step reads it. */
+const proxyMod = (await import("../scripts/reglookup-function.js")) as unknown as {
+  createRegLookupProxyHandler: (o: Record<string, unknown>) => {
+    handle: (event: Record<string, unknown>) => Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
+  };
+  handler: (event: Record<string, unknown>) => Promise<{ statusCode: number; body: string }>;
+  INLINE_API_KEY: string;
+  UPSTREAM_BASE_URL: string;
+  UPSTREAM_AUTH_HEADER: string;
+  realKey: (v: unknown) => string;
+};
+const createProxy = proxyMod.createRegLookupProxyHandler;
+const KEY = "unit-test-key-not-real";
+/** Upstream stub: records the call, answers with the given status/body. */
+function upstream(status: number, body: unknown, seen?: { url?: string; headers?: Record<string, string> }) {
+  return async (url: string, init?: { headers?: Record<string, string> }) => {
+    if (seen) {
+      seen.url = url;
+      seen.headers = init?.headers ?? {};
+    }
+    return { status, text: async () => (typeof body === "string" ? body : JSON.stringify(body)) };
+  };
+}
+const okEvent = { httpMethod: "GET", path: "/api/reglookup/AB12CDE", headers: { referer: "https://n2wheels.co.uk/fitment" } };
+
+check("committed template carries NO key (placeholder only)", proxyMod.realKey(proxyMod.INLINE_API_KEY) === "", proxyMod.INLINE_API_KEY.replace(/[A-Za-z0-9]/g, "*").slice(0, 8));
+check("upstream base url is the live VehicleMatic Vehicle Details endpoint", proxyMod.UPSTREAM_BASE_URL === "https://vehiclematic.com/products/vehicle-details/api/live", proxyMod.UPSTREAM_BASE_URL);
+const proxyIsUnconfigured = await createProxy({ logger: () => {} }).handle(okEvent);
+check("no key inlined -> honest 503 and NO upstream call (template is safe to deploy)", proxyIsUnconfigured.statusCode === 503 && JSON.parse(proxyIsUnconfigured.body).proxyError === "not_configured" && JSON.parse(proxyIsUnconfigured.body).upstreamStatus === null, proxyIsUnconfigured.body);
+let unconfiguredCalls = 0;
+await createProxy({ apiKey: "", fetchImpl: async () => { unconfiguredCalls += 1; return { status: 200, text: async () => "{}" }; }, logger: () => {} }).handle(okEvent);
+check("an empty key makes NO upstream call at all", unconfiguredCalls === 0, String(unconfiguredCalls));
+
+const seenCall: { url?: string; headers?: Record<string, string> } = {};
+const okRes = await createProxy({ apiKey: KEY, fetchImpl: upstream(200, REG_PAYLOAD, seenCall), logger: () => {} }).handle(okEvent);
+const okBody = JSON.parse(okRes.body) as Record<string, unknown>;
+check("200 -> status mirrored, upstream data + credit balance passed through", okRes.statusCode === 200 && okBody.n2proxy === 1 && okBody.upstreamStatus === 200 && (okBody.data as { make?: string })?.make === "FORD", okRes.body.slice(0, 160));
+check("200 -> content-type JSON and no-store cache header", /application\/json/.test(okRes.headers["content-type"]) && okRes.headers["cache-control"] === "no-store", JSON.stringify(okRes.headers));
+check("200 -> upstream called with the VehicleMatic header and the right URL", seenCall.url === `${proxyMod.UPSTREAM_BASE_URL}/AB12CDE` && seenCall.headers?.[proxyMod.UPSTREAM_AUTH_HEADER] === KEY && !/bearer/i.test(JSON.stringify(seenCall.headers)), JSON.stringify(seenCall));
+check("200 -> the key is NEVER in the response body", !okRes.body.includes(KEY), "body checked");
+check("no vehicle is ever invented by the proxy (payload mapped by the client, unchanged)", !("vehicle" in okBody) && (okBody.data as { model?: string })?.model === "FIESTA");
+
+const noMatchRes = await createProxy({ apiKey: KEY, fetchImpl: upstream(404, { error: true, code: "no_data", message: "No data found for registration AB12CDE." }), logger: () => {} }).handle(okEvent);
+const noMatchBody = JSON.parse(noMatchRes.body) as Record<string, unknown>;
+check("404 upstream -> 404 mirrored, honest message, NO vehicle fields", noMatchRes.statusCode === 404 && noMatchBody.upstreamStatus === 404 && /No data found/.test(String(noMatchBody.message)) && !("data" in noMatchBody), noMatchRes.body);
+const creditRes = await createProxy({ apiKey: KEY, fetchImpl: upstream(402, { error: true, message: "Insufficient credits for this product.", credit_balance: 0 }), logger: () => {} }).handle(okEvent);
+check("402 upstream -> 402 mirrored with the credit balance passed through", creditRes.statusCode === 402 && JSON.parse(creditRes.body).credit_balance === 0, creditRes.body);
+const forbiddenRes = await createProxy({ apiKey: KEY, fetchImpl: upstream(403, { error: true, message: "not authorised" }), logger: () => {} }).handle(okEvent);
+check("403 upstream -> 403 mirrored (distinct honest error client-side)", forbiddenRes.statusCode === 403, forbiddenRes.body);
+const serverErrRes = await createProxy({ apiKey: KEY, fetchImpl: upstream(500, "<html>gateway</html>"), logger: () => {} }).handle(okEvent);
+check("500 upstream (non-JSON) -> status mirrored, marked upstream_error, NO vehicle", serverErrRes.statusCode === 500 && JSON.parse(serverErrRes.body).proxyError === "upstream_error" && !("data" in JSON.parse(serverErrRes.body)), serverErrRes.body);
+const unreadableRes = await createProxy({ apiKey: KEY, fetchImpl: upstream(200, "<html>not json</html>"), logger: () => {} }).handle(okEvent);
+check("200 upstream with an unreadable body -> honest 502, never a vehicle", unreadableRes.statusCode === 502 && JSON.parse(unreadableRes.body).proxyError === "unreadable", unreadableRes.body);
+const unreachableRes = await createProxy({ apiKey: KEY, fetchImpl: async () => { throw new Error("ECONNREFUSED"); }, logger: () => {} }).handle(okEvent);
+check("upstream network error -> honest 502 'unreachable', never a vehicle", unreachableRes.statusCode === 502 && JSON.parse(unreachableRes.body).proxyError === "unreachable" && !("data" in JSON.parse(unreachableRes.body)), unreachableRes.body);
+const timeoutRes = await createProxy({
+  apiKey: KEY,
+  timeoutMs: 5,
+  logger: () => {},
+  fetchImpl: async (_url: string, init?: { signal?: AbortSignal }) => {
+    await new Promise((_r, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    });
+    throw new Error("unreachable");
+  },
+}).handle(okEvent);
+check("upstream timeout -> honest 502 'timeout' (never a hang, never a vehicle)", timeoutRes.statusCode === 502 && JSON.parse(timeoutRes.body).proxyError === "timeout", timeoutRes.body);
+
+const badPlateRes = await createProxy({ apiKey: KEY, fetchImpl: async () => { throw new Error("must not be called"); }, logger: () => {} }).handle({ httpMethod: "GET", path: "/api/reglookup/!!" });
+check("invalid plate -> 400 and NO upstream call (a bad plate is not billed)", badPlateRes.statusCode === 400 && JSON.parse(badPlateRes.body).proxyError === "bad_request", badPlateRes.body);
+const queryForm = await createProxy({ apiKey: KEY, fetchImpl: upstream(200, REG_PAYLOAD), logger: () => {} }).handle({ httpMethod: "GET", path: "/.netlify/functions/reglookup", queryStringParameters: { vrm: "ab12 cde" } });
+check("query form (?vrm=) works and the plate is normalised", queryForm.statusCode === 200 && JSON.parse(queryForm.body).vrm === "AB12CDE", queryForm.body);
+const otherSite = await createProxy({ apiKey: KEY, fetchImpl: async () => { throw new Error("must not be called"); }, logger: () => {} }).handle({ httpMethod: "GET", path: "/api/reglookup/AB12CDE", headers: { origin: "https://not-our-site.example" } });
+check("a browser caller from another site -> 403, no billed lookup", otherSite.statusCode === 403 && JSON.parse(otherSite.body).proxyError === "forbidden", otherSite.body);
+const curlLike = await createProxy({ apiKey: KEY, fetchImpl: upstream(200, REG_PAYLOAD), logger: () => {} }).handle({ httpMethod: "GET", path: "/api/reglookup/AB12CDE" });
+check("no referer/origin (server-side caller) is allowed", curlLike.statusCode === 200, curlLike.body.slice(0, 80));
+const limited = createProxy({ apiKey: KEY, maxPerMinute: 2, fetchImpl: upstream(200, REG_PAYLOAD), logger: () => {} });
+await limited.handle(okEvent);
+await limited.handle(okEvent);
+const limitedRes = await limited.handle(okEvent);
+check("per-caller rate limit -> honest 429, no billed lookup", limitedRes.statusCode === 429 && JSON.parse(limitedRes.body).proxyError === "rate_limited", limitedRes.body);
+
+// ── the key must never be logged, by the default logger or by ours ──────────
+const spyLines: string[] = [];
+const spyLogger = (code: string, status: number) => spyLines.push(`${code} ${status}`);
+for (const holder of [
+  createProxy({ apiKey: KEY, fetchImpl: async () => { throw new Error("boom"); }, logger: spyLogger }),
+  createProxy({ apiKey: KEY, fetchImpl: upstream(404, { error: true }), logger: spyLogger }),
+  createProxy({ apiKey: KEY, fetchImpl: upstream(200, REG_PAYLOAD), logger: spyLogger }),
+  createProxy({ apiKey: KEY, fetchImpl: async () => { throw new Error("boom"); } }),
+]) {
+  await holder.handle(okEvent);
+}
+const originalLog = console.log;
+const defaultLogged: string[] = [];
+console.log = (...args: unknown[]) => defaultLogged.push(args.join(" "));
+try {
+  await createProxy({ apiKey: KEY, fetchImpl: async () => { throw new Error("boom"); } }).handle(okEvent);
+  await createProxy({ apiKey: KEY, fetchImpl: upstream(200, REG_PAYLOAD) }).handle(okEvent);
+} finally {
+  console.log = originalLog;
+}
+check("the key is NEVER logged (explicit logger, default logger, every path)", ![...spyLines, ...defaultLogged].join("\n").includes(KEY), JSON.stringify([...spyLines, ...defaultLogged]));
+check("logs name the outcome only — never the plate", ![...spyLines, ...defaultLogged].join("\n").includes("AB12CDE"), JSON.stringify([...spyLines, ...defaultLogged]));
+check("default logger did log the outcome (it isn't silently swallowing everything)", defaultLogged.length >= 2, JSON.stringify(defaultLogged));
+const netlifyEntry = await proxyMod.handler(okEvent);
+const netlifyBody = JSON.parse(netlifyEntry.body) as Record<string, unknown>;
+check("Netlify entry point (committed template, no key) honestly reports 503 not-configured JSON", netlifyEntry.statusCode === 503 && netlifyBody.n2proxy === 1 && netlifyBody.proxyError === "not_configured", netlifyEntry.body.slice(0, 120));
 
 console.log("---");
 console.log(`RESULT: ${pass} passed, ${fail} failed`);

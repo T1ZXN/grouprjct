@@ -8,7 +8,7 @@ export const Route = createFileRoute("/fitment")({
       {
         name: "description",
         content:
-          "Find alloy wheels for your car by UK registration or make, model and year. Demo vehicle data until a live UK registration lookup is connected — we verify compatibility before confirming any order.",
+          "Find alloy wheels for your car by UK registration or make, model and year. The plate lookup reads your car from the live UK registration record; wheel and tyre recommendations are sample data — we verify compatibility before confirming any order.",
       },
     ],
   }),
@@ -26,9 +26,10 @@ function FitmentPage() {
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-steel sm:text-base">
             Enter your UK registration or choose make, model and year and we'll recommend wheels
-            suited to your car. The vehicle data shown here is demo data, and a live UK
-            registration lookup is coming soon. We verify compatibility with your exact vehicle
-            before confirming any order — nothing is recommended with a blanket fitment guarantee.
+            suited to your car. The plate lookup reads your car's details from the live UK
+            registration record; the wheel and tyre recommendations shown here are sample data.
+            We verify compatibility with your exact vehicle before confirming any order — nothing
+            is recommended with a blanket fitment guarantee.
           </p>
           <div className="mt-8">
             <FitmentSearch />

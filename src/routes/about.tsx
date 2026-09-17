@@ -38,8 +38,9 @@ function AboutPage() {
           confirming any order. Not with guesses — with the real geometry of your car.
         </P>
         <P>
-          Today the website runs on a sample catalogue while we build out the real product feed,
-          a live UK registration lookup and order tooling. The look, the fitment process and the
+          Today the website runs on a sample catalogue while we build out the real product feed
+          and order tooling. A plate lookup against the live UK registration database is already
+          connected; the catalogue itself is sample data. The look, the fitment process and the
           service standards you see here are the ones we intend to launch with.
         </P>
       </ContentSection>
@@ -58,9 +59,9 @@ function AboutPage() {
         <NoteBox title="An honest note on where we are">
           <p>
             The products shown on this site today are sample/demo data — no live stock or
-            availability is claimed. Payment and a live UK registration lookup are coming in later
-            milestones; the fitment process and quality standards described here are the real
-            ones we ship with.
+            availability is claimed. The plate lookup reads the live UK registration record;
+            payment is coming in a later milestone. The fitment process and quality standards
+            described here are the real ones we ship with.
           </p>
         </NoteBox>
       </ContentSection>

@@ -13,9 +13,18 @@
  *    to the real public domain https://n2wheels.co.uk in the exported HTML and in
  *    any exported JS chunk that carries it (canonical link + JSON-LD were the only
  *    places the app hard-codes it; the app source is left untouched).
- *  - Writes Netlify plumbing: netlify.toml (publish = "."), _redirects (SPA
- *    fallback for unknown routes), robots.txt (blocks /admin) and
- *    README-NETLIFY.md.
+ *  - Writes Netlify plumbing: netlify.toml (publish = ".", functions dir),
+ *    _redirects (same-origin reg-lookup proxy + SPA fallback for unknown
+ *    routes), robots.txt (blocks /admin) and README-NETLIFY.md.
+ *  - GENERATES the same-origin reg-lookup proxy function
+ *    (dist-netlify/netlify/functions/reglookup.js) from the keyless template in
+ *    scripts/reglookup-function.js, INLINING the provider key from the build
+ *    environment. That is the ONLY file in the export that carries the key, and
+ *    the key never reaches the client bundle — the build strips it from the
+ *    Vite env (vite.config.ts) and this script refuses to export if it ever
+ *    shows up in a shipped HTML/JS/CSS file.
+ *  - With NO provider key in the environment the proxy is skipped (the site
+ *    stays in honest demo mode); the export still succeeds.
  *
  * USAGE (regeneration after site changes):
  *     cd /home/team/shared/site
@@ -36,6 +45,19 @@ import handler from "./dist/server/server.js";
 const SITE_DIR = import.meta.dir;
 const OUT = path.join(SITE_DIR, "dist-netlify");
 const PUBLIC_HOST = "https://n2wheels.co.uk";
+
+// ── Same-origin reg-lookup proxy (Netlify Function) ─────────────────────────
+// The provider key is inlined into the GENERATED function at export time from
+// the build environment — never committed, never in the client bundle.
+const REG_LOOKUP_KEY_ENV = "VITE_REG_LOOKUP_KEY";
+const REG_LOOKUP_KEY_PLACEHOLDER = "__N2_REG_LOOKUP_KEY__";
+const REG_LOOKUP_FUNCTION_TEMPLATE = path.join(SITE_DIR, "scripts", "reglookup-function.js");
+const REG_LOOKUP_FUNCTION_REL = "netlify/functions/reglookup.js";
+const REG_LOOKUP_FUNCTION_OUT = path.join(OUT, REG_LOOKUP_FUNCTION_REL);
+/** Same-origin route the site calls; rewritten to the function in _redirects. */
+const REG_LOOKUP_PROXY_ROUTE = "/api/reglookup";
+/** Text files a shipped key could hide in (images/fonts are skipped). */
+const TEXT_EXT = [".html", ".js", ".mjs", ".cjs", ".css", ".json", ".txt", ".toml", ".md", ".xml", ".map"];
 
 // Sandbox preview host in rendered output (canonical / JSON-LD / og URLs) is
 // rewritten to the real domain. Matches https://<label>.ctonew.app (and bare
@@ -92,6 +114,70 @@ async function prerender(route: string): Promise<void> {
   log(status === 200, `${status} ${route} -> ${path.relative(OUT, filePath)} (${(html.length / 1024).toFixed(1)} KB)`);
 }
 
+/**
+ * The provider key for this build, or undefined. Read here (build time) and
+ * INLINED into the generated function — it is never logged, never returned and
+ * never written anywhere else in the export.
+ */
+function regLookupKey(): string | undefined {
+  const raw = process.env[REG_LOOKUP_KEY_ENV];
+  const key = typeof raw === "string" ? raw.trim() : "";
+  return key === "" ? undefined : key;
+}
+
+/** Generate the same-origin reg-lookup proxy function from the keyless template. */
+async function emitRegLookupProxyFunction(key: string | undefined): Promise<void> {
+  const template = await readFile(REG_LOOKUP_FUNCTION_TEMPLATE, "utf8");
+  // The placeholder must appear EXACTLY ONCE (the INLINE_API_KEY assignment). If
+  // it appeared in prose too, the substitution could land the key in a comment
+  // instead of the assignment — which silently ships a function with no key.
+  const placeholderCount = template.split(REG_LOOKUP_KEY_PLACEHOLDER).length - 1;
+  if (placeholderCount !== 1) {
+    throw new Error(
+      `reg-lookup function template must contain ${REG_LOOKUP_KEY_PLACEHOLDER} exactly once (found ${placeholderCount}): ${REG_LOOKUP_FUNCTION_TEMPLATE}`,
+    );
+  }
+  if (!key) {
+    // No key in this build: ship no proxy at all. The client build for an
+    // env-less build is in honest demo mode (vite.config.ts derives the same
+    // flag from the same variable), so nothing calls a missing route.
+    console.log("  ! no provider key in the build env — reg-lookup proxy NOT generated (honest demo mode)");
+    return;
+  }
+  const source = template.split(REG_LOOKUP_KEY_PLACEHOLDER).join(JSON.stringify(key).slice(1, -1));
+  if (source.includes(REG_LOOKUP_KEY_PLACEHOLDER) || !source.includes(key)) {
+    throw new Error(
+      "SECURITY: the generated reg-lookup proxy did not receive the provider key cleanly — refusing to export.",
+    );
+  }
+  await mkdir(path.dirname(REG_LOOKUP_FUNCTION_OUT), { recursive: true });
+  await writeFile(REG_LOOKUP_FUNCTION_OUT, source, "utf8");
+  console.log(`  ✓ ${REG_LOOKUP_FUNCTION_REL} (key inlined from ${REG_LOOKUP_KEY_ENV}, not printed)`);
+}
+
+/**
+ * HARD GUARD: no shipped text file may contain the provider key. The proxy
+ * function is the single, deliberate exception (it is server-side code that
+ * Netlify never serves as a static file).
+ */
+async function assertKeyNotShipped(key: string | undefined): Promise<void> {
+  if (!key) return;
+  const offenders: string[] = [];
+  for (const f of await readdir(OUT, { recursive: true })) {
+    const rel = String(f).split(path.sep).join("/");
+    if (rel === REG_LOOKUP_FUNCTION_REL) continue;
+    if (!TEXT_EXT.some((e) => rel.endsWith(e))) continue;
+    const text = (await readFile(path.join(OUT, String(f)))).toString("utf8");
+    if (text.includes(key)) offenders.push(rel);
+  }
+  if (offenders.length) {
+    throw new Error(
+      `SECURITY: the provider key appears in shipped file(s) — refusing to export:\n  ${offenders.join("\n  ")}`,
+    );
+  }
+  console.log("  ✓ provider key absent from every shipped HTML/JS/CSS file");
+}
+
 async function main() {
   const { demoWheels, demoTypes, demoPackages, demoAccessories } = await import("./src/data/products.ts");
   const detailPaths = [
@@ -114,6 +200,12 @@ async function main() {
   await cp(path.join(SITE_DIR, "dist/client/assets"), path.join(OUT, "assets"), { recursive: true });
   await cp(path.join(SITE_DIR, "dist/client/images"), path.join(OUT, "images"), { recursive: true });
 
+  // Same-origin reg-lookup proxy (Netlify Function) + the key-leak guard.
+  console.log("Generating the same-origin reg-lookup proxy …");
+  const key = regLookupKey();
+  await emitRegLookupProxyFunction(key);
+  await assertKeyNotShipped(key);
+
   // Host rewrite in exported JS chunks that embed the preview host (defence in
   // depth; only the homepage route chunk is known to contain it today).
   for (const f of await readdir(path.join(OUT, "assets"))) {
@@ -134,8 +226,15 @@ async function main() {
 [build]
   publish = "."
 
-# SPA fallback lives in _redirects (kept separate from netlify.toml on purpose —
-# Netlify errors if the same rule is defined in both places).
+# Netlify Functions (the same-origin reg-lookup proxy) live at the zip root's
+# netlify/functions — that is the directory Netlify auto-detects, declared here
+# so the layout is explicit for a manual/API (zip) deploy.
+[functions]
+  directory = "netlify/functions"
+
+# SPA fallback + the /api/reglookup rewrite live in _redirects (kept separate
+# from netlify.toml on purpose — Netlify errors if the same rule is defined in
+# both places).
 [build.environment]
   NODE_VERSION = "20"
 `,
@@ -143,7 +242,13 @@ async function main() {
   );
   await writeFile(
     path.join(OUT, "_redirects"),
-    `# SPA fallback for unknown routes ONLY: every known route has a real
+    `# Same-origin registration-lookup proxy -> Netlify Function.
+# The function holds the provider key SERVER-SIDE and makes the upstream call,
+# because the provider sends no CORS headers (a direct browser call is blocked).
+# Must stay ABOVE the catch-all below.
+${REG_LOOKUP_PROXY_ROUTE}/*    /.netlify/functions/reglookup?vrm=:splat    200
+
+# SPA fallback for unknown routes ONLY: every known route has a real
 # prerendered HTML file below, and Netlify serves files before redirects, so
 # this catch-all only kicks in for paths that don't exist on disk.
 /*    /index.html   200
@@ -173,10 +278,14 @@ it as-is: no Node server, no build step, works on the free tier.
   product detail pages, basket & checkout, info pages, /admin)
 - \`assets/\` — hashed client JS/CSS (\`/assets/...\`)
 - \`images/\` — product & category imagery (\`/images/...\`)
-- \`netlify.toml\` — publish directory = \`.\`
-- \`_redirects\` — SPA fallback (\`/* /index.html 200\`) so unknown paths hydrate
-  the app instead of 404ing (known routes serve their own HTML — files win over
-  redirects on Netlify)
+- \`netlify/functions/reglookup.js\` — the same-origin registration-lookup
+  **proxy** (server-side; the only file that carries the provider key, which the
+  export inlines from the build environment). The site calls
+  \`/api/reglookup/{VRM}\`; \`_redirects\` rewrites that to this function.
+- \`netlify.toml\` — publish directory = \`.\` and the functions directory
+- \`_redirects\` — the \`/api/reglookup/*\` rewrite, then the SPA fallback
+  (\`/* /index.html 200\`) so unknown paths hydrate the app instead of 404ing
+  (known routes serve their own HTML — files win over redirects on Netlify)
 - \`robots.txt\` — blocks \`/admin\` and the \`/admin\` page itself carries a
   \`noindex, nofollow\` meta tag
 
@@ -208,7 +317,12 @@ SSR handler, recopies assets/images and rewrites the preview host to
   prerendered pages.
 - No supplier feed URLs, secrets or credentials are shipped in this folder
   (a full grep of the export for secrets, env-var names and supplier domains is
-  part of the verification script).
+  part of the verification script; the export script itself REFUSES to write a
+  build where the provider key appears in any shipped HTML/JS/CSS file).
+- The registration-lookup proxy function is the single file holding the
+  provider key: it is server-side code (never served as a static file) and it
+  logs neither the key nor the plate. With no key inlined it answers an honest
+  503 and never calls the provider.
 - No checkout/payment functionality is included — payment stays off until real
   credentials exist. (The basket and /checkout pages ARE exported, but they take
   no payment: with no payment provider configured, checkout hands the customer

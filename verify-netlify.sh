@@ -92,6 +92,16 @@ if grep -aq "n2wheels.co.uk" "$OUT/index.html"; then echo "PASS canonical host =
 if [ -f "$OUT/robots.txt" ] && grep -q "Disallow: /admin" "$OUT/robots.txt"; then echo "PASS robots.txt blocks /admin"; else fail=$((fail+1)); echo "FAIL robots.txt missing" >> "$LOG"; fi
 if [ -f "$OUT/_redirects" ] && grep -q "/index.html" "$OUT/_redirects"; then echo "PASS _redirects SPA fallback present"; else fail=$((fail+1)); echo "FAIL _redirects missing" >> "$LOG"; fi
 if [ -f "$OUT/netlify.toml" ] && grep -q 'publish = "\."' "$OUT/netlify.toml"; then echo "PASS netlify.toml publish = ."; else fail=$((fail+1)); echo "FAIL netlify.toml missing" >> "$LOG"; fi
+# Generated reg-lookup proxy: if this build had a provider key, the emitted
+# function must carry it in the INLINE_API_KEY assignment (placeholder gone).
+FN="$OUT/netlify/functions/reglookup.js"
+if [ -f "$FN" ]; then
+  if grep -q "__N2_REG_LOOKUP_KEY__" "$FN"; then
+    fail=$((fail+1)); echo "FAIL generated reg-lookup function still holds the key placeholder (not configured)" >> "$LOG"
+  else echo "PASS generated reg-lookup proxy substituted its key placeholder"; fi
+else
+  echo "! no reg-lookup proxy function in the export (no provider key in this build) — honest demo mode"
+fi
 
 echo "---"
 echo "RESULT: $pass passed, $fail failed"

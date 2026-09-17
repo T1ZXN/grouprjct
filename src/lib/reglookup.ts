@@ -18,25 +18,26 @@
  *   • Returns labelled sample wheel-fitting guidance for manual searches,
  *     always surfaced with the "Sample fitment data" notice.
  *
- * ── WIRING A REAL PROVIDER (UK reg API and/or Boughto-style fits API) ────────
- * 1. Implement the `VehicleDataProvider` interface in a new module, e.g.
- *    src/lib/reglookup-boughto.ts (fits) and/or src/lib/reglookup-dvla.ts (reg).
- * 2. `registerProvider(yourProvider)` next to the demo registration below.
- * 3. Set the matching key in the site environment (Vite client env, `VITE_*`):
- *      VITE_REG_LOOKUP_KEY  -> UK registration-lookup API key (plate -> vehicle)
- *      VITE_FITS_API_KEY    -> fitment-database API key (make/model -> fits data)
- *    With no key set, the layer stays in demo mode and labels everything.
- * 4. Wire providers to keys in `getActiveProvider()` (see the seam marker).
- * No component or route needs to change — the UI already renders whatever the
- * active provider returns, including the "live" vs "demo" label.
- *
- * Env vars are read from `import.meta.env` (Vite client env). The site builds
- * and runs with NO .env file at all — missing keys simply mean demo mode.
+ * ── LIVE MODE: HOW IT IS SWITCHED ON ────────────────────────────────────────
+ * Plate -> vehicle is LIVE in the site's own build: the lookup goes to the
+ * SAME-ORIGIN proxy (/api/reglookup/{VRM}, served by the server-side function
+ * generated at export time), so the provider key never enters the browser.
+ *   • production/export build  -> `__N2_REG_LOOKUP_PROXY__` is true because the
+ *     build was given the provider key to inline into that proxy (vite.config.ts
+ *     derives the flag from the key's PRESENCE and then strips the key itself).
+ *   • no proxy and no key      -> honest demo mode (labelled sample data).
+ *   • VITE_REG_LOOKUP_URL + VITE_REG_LOOKUP_KEY (absolute URL) -> direct call to
+ *     the provider, for debugging with a deliberately built key — never the
+ *     shipped path, and never a key in the bundle.
+ *   • VITE_REG_LOOKUP_PROXY=1  -> forces the proxy mode outside a Vite build
+ *     (used by the child-process tests to pin the mode).
+ * The site builds and runs with NO .env file at all — nothing configured simply
+ * means demo mode.
  */
 import { demoProvider } from "./reglookup-demo";
 import { FITS_API_ENV_KEY as FITS_API_ENV_KEY_CONST, fitsProvider } from "./reglookup-fits";
 import { createLiveProvider, LIVE_PROVIDER_ID } from "./reglookup-live";
-import { REG_LOOKUP_ENV_KEY as REG_LOOKUP_ENV_KEY_CONST, ukVrmProvider } from "./reglookup-ukvrm";
+import { REG_LOOKUP_ENV_KEY as REG_LOOKUP_ENV_KEY_CONST, isRegLookupProxyBuild, ukVrmProvider } from "./reglookup-ukvrm";
 
 /** A vehicle as identified by a registration lookup (or manual details). */
 export interface Vehicle {
@@ -136,10 +137,12 @@ export function registerProvider(provider: VehicleDataProvider): void {
 providers.set(demoProvider.id, demoProvider);
 
 /**
- * LIVE providers, registered at startup. Each declares the Vite client-env key
- * that activates it; neither does anything until its key is configured, so the
- * site ships in honest demo mode by default.
- *   • ukVrmProvider  — plate -> vehicle   (VITE_REG_LOOKUP_KEY)
+ * LIVE providers, registered at startup. The reg provider is active when the
+ * build ships the same-origin proxy (production) or when an explicit keyed
+ * override is configured; the fits provider when its key is present. Neither
+ * does anything until then, so the site ships in honest demo mode by default.
+ *   • ukVrmProvider  — plate -> vehicle   (same-origin proxy; VITE_REG_LOOKUP_KEY
+ *                                          only for the direct debug override)
  *   • fitsProvider   — vehicle -> fitments (VITE_FITS_API_KEY)
  */
 registerProvider(ukVrmProvider);
@@ -155,21 +158,53 @@ function readClientEnv(): Record<string, string | boolean | undefined> {
   return env ?? {};
 }
 
-/** Which provider keys are configured (both empty -> demo mode). */
-export function getConfiguredKeys(): { regLookupKey?: string; fitsApiKey?: string } {
+/**
+ * How plate lookups are configured in THIS build:
+ *   `proxy`  — the build ships the same-origin proxy (production; no client key)
+ *   `key`    — an explicit direct-override key is present (debug/scripts)
+ *   `active` — either of the above, i.e. live mode rather than demo mode
+ */
+export interface RegLookupConfig {
+  proxy: boolean;
+  key?: string;
+  active: boolean;
+}
+
+/** Read the reg-lookup configuration for this build/env. */
+export function getRegLookupConfig(env: Record<string, string | boolean | undefined> = readClientEnv()): RegLookupConfig {
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const proxy = isRegLookupProxyBuild(env);
+  const key = str(env[REG_LOOKUP_ENV_KEY]);
+  return { proxy, key, active: proxy || Boolean(key) };
+}
+
+/** Which provider keys/sources are configured (nothing configured -> demo mode). */
+export function getConfiguredKeys(): {
+  regLookupKey?: string;
+  regLookupProxy: boolean;
+  fitsApiKey?: string;
+} {
   const env = readClientEnv();
   const str = (v: unknown): string | undefined =>
     typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const { key, proxy } = getRegLookupConfig(env);
   return {
-    regLookupKey: str(env[REG_LOOKUP_ENV_KEY]),
+    regLookupKey: key,
+    regLookupProxy: proxy,
     fitsApiKey: str(env[FITS_API_ENV_KEY]),
   };
 }
 
 /**
  * Pick the active provider:
- *  1. the first REGISTERED provider whose API key is configured, else
+ *  1. the first REGISTERED provider that is configured for this build, else
  *  2. the demo provider (always available, always clearly labelled).
+ *
+ * "Configured" for the reg provider means the build ships the same-origin proxy
+ * (`__N2_REG_LOOKUP_PROXY__`, derived from the provider key's presence at build
+ * time) or an explicit direct-override key is set — NEVER the key itself
+ * reaching the browser.
  *
  * ═══ SEAM: wire real providers here ═══
  * Once a real adapter exists, import it and register it, e.g.:
@@ -181,10 +216,10 @@ export function getConfiguredKeys(): { regLookupKey?: string; fitsApiKey?: strin
  * the layer to live lookups automatically — no component changes needed.
  */
 export function getActiveProvider(): VehicleDataProvider {
-  const { regLookupKey, fitsApiKey } = getConfiguredKeys();
-  const reg = regLookupKey ? providers.get(ukVrmProvider.id) : undefined;
+  const { regLookupKey, regLookupProxy, fitsApiKey } = getConfiguredKeys();
+  const reg = regLookupProxy || regLookupKey ? providers.get(ukVrmProvider.id) : undefined;
   const fits = fitsApiKey ? providers.get(fitsProvider.id) : undefined;
-  // ═══ LIVE MODE: any real key -> the composite live provider ═══
+  // ═══ LIVE MODE: proxy build or any real key -> the composite live provider ═══
   // Exactly which capability is live is named in the provider label, and each
   // result carries its own source label, so nothing here is ever mislabelled.
   if (reg || fits) return createLiveProvider({ reg, fits });
@@ -192,7 +227,7 @@ export function getActiveProvider(): VehicleDataProvider {
   for (const provider of providers.values()) {
     if (!provider.keyName || provider.id === DEMO_PROVIDER_ID) continue;
     const hasKey =
-      (provider.keyName === REG_LOOKUP_ENV_KEY && Boolean(regLookupKey)) ||
+      (provider.keyName === REG_LOOKUP_ENV_KEY && (Boolean(regLookupKey) || regLookupProxy)) ||
       (provider.keyName === FITS_API_ENV_KEY && Boolean(fitsApiKey));
     if (hasKey) return provider;
   }

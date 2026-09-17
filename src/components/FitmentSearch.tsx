@@ -32,15 +32,15 @@ interface FitmentResult {
  * make/model/year selects and a wheel-diameter select.
  *
  * Runs entirely on the vehicle-lookup provider layer (`src/lib/reglookup.ts`).
- * With no API key configured every result is DEMO data, clearly labelled:
- *   - a registration plate is NEVER turned into a fabricated vehicle — the
- *     layer returns "lookup not connected" and the customer stays on the
- *     manual path;
+ * The plate path is LIVE in the shipped build — it calls the site's own
+ * same-origin proxy (`/api/reglookup/{VRM}`), so the provider key never reaches
+ * the browser. An unmatched or failed plate is NEVER turned into a fabricated
+ * vehicle: the customer is offered the manual path instead.
  *   - manual make/model/year searches return sample fitment options · always
  *     with the "Sample fitment data — we confirm compatibility before you
  *     order" notice.
- * When a real provider key is added (see reglookup.ts), live results flow in
- * with their own label through this same component — no redesign needed.
+ * With nothing configured (env-less build) the layer falls back to honest demo
+ * mode and labels every result — no redesign is needed for either case.
  */
 export function FitmentSearch() {
   const [registration, setRegistration] = useState("");
@@ -148,9 +148,9 @@ export function FitmentSearch() {
               aria-describedby="fit-reg-help"
             />
             <p id="fit-reg-help" className="mt-1.5 text-xs text-steel-dim">
-              Or skip the plate and choose your car below. The plate lookup connects to a live UK
-              database once a provider key is configured — until then, results are never invented,
-              so use the manual path below.
+              Or skip the plate and choose your car below. The plate lookup reads your car's
+              details from the live UK registration record — results are never invented, so if a
+              plate can't be matched, use the manual path below.
             </p>
           </div>
 
@@ -257,7 +257,7 @@ export function FitmentSearch() {
         )}
       </form>
 
-      {/* Result — reg lookup not connected (no fabricated vehicle, honest) */}
+      {/* Result — reg lookup didn't answer (no fabricated vehicle, honest) */}
       {result?.regUnavailable && (
         <div className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/5 p-4 sm:p-5" role="status">
           <p className="text-xs font-semibold uppercase tracking-wider text-amber-200">Registration lookup</p>
