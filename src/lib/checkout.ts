@@ -28,6 +28,7 @@
  *              id: "stripe-checkout",
  *              label: "Secure card payment (Stripe Checkout)",
  *              checkoutUrl: "https://checkout.stripe.com/c/pay/…",  // from config
+ *              amountNote: "…",   // optional honest note shown with the notice
  *            }),
  *          );
  *
@@ -37,17 +38,31 @@
  *
  *   2. Give it the configuration it needs. The seam reads it from the build
  *      environment under `CHECKOUT_URL_ENV_KEY` (see below) — the ONE config
- *      slot this module defines. That value does not exist yet and no
- *      credential is invented here: until the platform supplies a real hosted
- *      checkout URL, the seam stays in its honest enquiry handoff.
+ *      slot this module defines. No credential is invented here: a value must
+ *      come from the build environment (`.env`, gitignored) or the seam stays in
+ *      its honest enquiry handoff.
  *
  *   3. Building with that value set switches /checkout to the provider
  *      automatically — the page simply follows the `redirect` outcome. Without
  *      it, nothing changes and no customer is misled.
  *
+ * ── LIVE TODAY: the hosted checkout is CONFIGURED (2026-09-17) ────────────────
+ * The business's real Stripe account is connected and a Stripe Payment Link
+ * exists, so the build environment now sets `VITE_CHECKOUT_URL` to it. That
+ * value is build-time config only — it is NOT in this repository and NOT a
+ * secret (a Payment Link is a public URL); nothing here invents one.
+ *
+ * `src/lib/checkout-stripe.ts` registers the resulting provider
+ * (`stripe-hosted-demo`) whenever that build value is present, and the
+ * /checkout page then shows the honest demo-payment note (`amountNote`):
+ * the catalogue is SAMPLE data and the connected link is a FIXED £1.00 test
+ * charge, not the basket total — and the confirmation comes from the payment
+ * provider's own page, never from this site.
+ *
  * Server-side order creation, stock checks and payment confirmation stay
  * outside this seam's scope: when they exist they wrap it, and only a provider
- * that has actually confirmed a payment may ever report success.
+ * that has actually confirmed a payment may ever report success. The redirect
+ * outcome is still NOT a success — it only means the browser was handed over.
  */
 import type { BasketLine } from "~/lib/basket";
 import { basketSummaryLines, basketTotals, lineTotal } from "~/lib/basket";
@@ -123,6 +138,12 @@ export type CheckoutOutcome =
       label: string;
       url: string;
       notice: string;
+      /**
+       * Honest demo/amount note that travels WITH the outcome (copied from the
+       * provider config). The page shows it before and after the hand-over, so
+       * a customer always reads what the connected page will really charge.
+       */
+      amountNote?: string;
     }
   | {
       /** No online payment exists: the order is handed to the business by email. */
@@ -149,6 +170,18 @@ export interface CheckoutProvider {
   canTakePayment: boolean;
   /** Build-env key that activates this provider (undefined for the default). */
   keyName?: string;
+  /**
+   * The hosted page this provider hands the browser to (redirect providers
+   * only). Used to match a configured build value to the provider it belongs to
+   * when more than one provider shares a config key.
+   */
+  checkoutUrl?: string;
+  /**
+   * Honest, always-visible note that MUST accompany this provider's payment
+   * notice — e.g. "the basket is sample data and this link charges a fixed test
+   * amount". Lives in the provider's own config, never hardcoded in a page.
+   */
+  amountNote?: string;
   startCheckout(request: CheckoutRequest): Promise<CheckoutOutcome>;
 }
 
@@ -277,6 +310,18 @@ export function buildOrderEnquiryMailto(
 export const ENQUIRY_NOTICE =
   "No payment is taken on this website. Online card payment is not switched on yet, so we cannot process an order here — your basket is prepared as an email to our team instead, and we confirm availability, delivery and payment with you directly.";
 
+/**
+ * The honest note carried by the hosted-checkout provider we ship today (a
+ * Stripe Payment Link on the business's connected account). It travels in the
+ * provider's config — `amountNote` — so the page renders it from configuration
+ * rather than hardcoding it, and it states the three things a customer must
+ * know before paying: the catalogue is sample data, the connected page charges a
+ * FIXED £1.00 test amount (NOT the basket total shown), and any confirmation
+ * comes from the payment provider's own page — never from this site.
+ */
+export const DEMO_CHECKOUT_AMOUNT_NOTE =
+  "Please read before you pay: every item in this basket is SAMPLE (demo) data — no live stock and no supplier price is claimed — and the card checkout this site is connected to is a fixed £1.00 test payment, not the basket total shown here. The delivery details you entered are not sent to the payment provider. Payment confirmation comes from the payment provider's own secure page: this website issues no order number and no receipt, and it does not place or confirm an order for you.";
+
 /* ── Providers ────────────────────────────────────────────────────────────── */
 
 const ENQUIRY_LABEL = "Order by email (no online payments yet)";
@@ -316,6 +361,12 @@ export interface RedirectProviderConfig {
   checkoutUrl: string;
   /** Env key that activates this provider (defaults to CHECKOUT_URL_ENV_KEY). */
   keyName?: string;
+  /**
+   * Honest note shown alongside the payment notice (see
+   * `DEMO_CHECKOUT_AMOUNT_NOTE`). Optional — but any provider that takes a
+   * fixed/test amount MUST set it.
+   */
+  amountNote?: string;
 }
 
 /**
@@ -328,11 +379,14 @@ export function createRedirectProvider(
 ): CheckoutProvider {
   const checkoutUrl = config.checkoutUrl?.trim() ?? "";
   if (checkoutUrl === "") return enquiryProvider;
+  const amountNote = config.amountNote?.trim() ?? "";
   return {
     id: config.id,
     label: config.label,
     canTakePayment: true,
     keyName: config.keyName ?? CHECKOUT_URL_ENV_KEY,
+    checkoutUrl,
+    ...(amountNote === "" ? {} : { amountNote }),
     async startCheckout({
       order,
       customer,
@@ -352,7 +406,8 @@ export function createRedirectProvider(
         label: config.label,
         url: checkoutUrl,
         notice:
-          "You will be taken to our payment provider's secure checkout page to complete the payment.",
+          "You will be taken to our payment provider's secure checkout page to complete the payment. This website never sees or stores your card details.",
+        ...(amountNote === "" ? {} : { amountNote }),
       };
     },
   };
@@ -381,11 +436,18 @@ export function registeredCheckoutProviderIds(): string[] {
 
 /**
  * Pick the active provider:
- *  1. a REGISTERED provider whose key is configured (real payment path), else
+ *  1. a REGISTERED provider that matches the configured build value (real
+ *     payment path), else
  *  2. `enquiryProvider` — the honest email handoff.
  *
- * Reads the build env (Vite `import.meta.env`). No configuration today means
- * the default, and the default takes no money and claims no order.
+ * Reads the build env (Vite `import.meta.env`). No configuration means the
+ * default, and the default takes no money and claims no order.
+ *
+ * When more than one registered provider shares `CHECKOUT_URL_ENV_KEY`, the
+ * configured VALUE decides: a provider whose own `checkoutUrl` is exactly the
+ * configured value wins, then the first registered provider under that key
+ * (registration order). That keeps the env value authoritative — a provider
+ * registered for one hosted page can never be returned for another URL.
  */
 export function getCheckoutProvider(
   env: ClientEnv = readClientEnv(),
@@ -394,19 +456,25 @@ export function getCheckoutProvider(
   if (checkoutUrl) {
     // A configured URL always means the hosted-checkout provider, whether the
     // caller registered one explicitly or we build the standard redirect one.
+    const candidates: CheckoutProvider[] = [];
     for (const provider of providers.values()) {
       if (
         provider.keyName === CHECKOUT_URL_ENV_KEY &&
         provider.id !== DEFAULT_PROVIDER_ID
       ) {
-        return provider;
+        candidates.push(provider);
       }
     }
-    return createRedirectProvider({
-      id: "hosted-checkout",
-      label: "Secure card payment (hosted checkout)",
-      checkoutUrl,
-    });
+    return (
+      candidates.find((p) => p.checkoutUrl === checkoutUrl) ??
+      candidates[0] ??
+      createRedirectProvider({
+        id: "hosted-checkout",
+        label: "Secure card payment (hosted checkout)",
+        checkoutUrl,
+        amountNote: DEMO_CHECKOUT_AMOUNT_NOTE,
+      })
+    );
   }
   for (const provider of providers.values()) {
     if (provider.id === DEFAULT_PROVIDER_ID || !provider.keyName) continue;
