@@ -4,7 +4,7 @@
  * ⚠️  SAMPLE/DEMO DATA. This is the list of models the site's make/model/year
  * selects offer (homepage search, /fitment, and the "Will this fit my car?"
  * checker on product pages). It is NOT a licensed fitment database and it is
- * NOT a statement that we stock wheels for every one of these models.
+ * NOT a statement that we stock tyres or wheels for every one of these models.
  *
  * WHY THIS FILE EXISTS
  * The model dropdown options (this file) and the per-product sample fitment
@@ -18,6 +18,14 @@
  * Imported by:
  *   - src/lib/reglookup-demo.ts   (re-exported as DEMO_FLEET → dropdown options)
  *   - src/data/products.ts        (fleetFitments() → sample fitment records)
+ *
+ * SCOPE (owner direction 2026-09-17): tyres are the main line and wheels the
+ * bonus line, so the fleet has to cover BOTH as broadly as a UK buyer expects —
+ * including the electric and Chinese-EV makes (Tesla, Xpeng, Polestar, NIO,
+ * Zeekr, Smart, BYD) alongside the established European, Japanese and Korean
+ * marques. Every model below is a real UK-market model name; we invent none.
+ * The first 13 makes (declaration order preserved so existing dropdown choices
+ * keep their position) are the original set — their model strings are unchanged.
  */
 export const FLEET_MODELS = {
   // German premium — full A/S/RS + Q range the way a UK buyer shops by model.
@@ -68,7 +76,9 @@ export const FLEET_MODELS = {
     "X6",
     "X7",
   ],
-  BYD: ["Atto 3", "Dolphin", "Seal", "Han", "Tang"],
+  // Chinese EV marques the owner named explicitly. The five original strings are
+  // untouched; the two larger models the UK range added since round it out.
+  BYD: ["Atto 3", "Dolphin", "Seal", "Han", "Tang", "Seal U", "Sealion 7"],
   Changan: ["CS35 Plus", "Eado", "UNI-V", "UNI-K"],
   Chery: ["Omoda 5", "Tiggo 7", "Tiggo 8"],
   Ford: ["Fiesta", "Focus", "Kuga", "Puma", "Mondeo", "Mustang", "Ranger", "Transit"],
@@ -98,6 +108,49 @@ export const FLEET_MODELS = {
   Toyota: ["Yaris", "Corolla", "RAV4", "Aygo", "Camry", "C-HR", "Land Cruiser", "Supra"],
   Volkswagen: ["Golf", "Golf R", "Polo", "Passat", "Tiguan", "T-Roc", "ID.3", "ID.4", "Arteon", "Touareg"],
   Vauxhall: ["Corsa", "Astra", "Mokka", "Insignia", "Grandland", "Vivaro"],
+
+  /* ── Added 2026-09-17: electric-first + broad UK coverage ─────────────────
+   * The makes below are NEW additions (the 13 above are unchanged apart from
+   * BYD's two extra models). Order here is simply the order we added them.
+   */
+
+  /* Tesla first: the single most requested EV fitment in the UK. */
+  Tesla: ["Model 3", "Model Y", "Model S", "Model X"],
+  Xpeng: ["G6", "G9", "P7"],
+  Polestar: ["2", "3", "4"],
+  NIO: ["ET5", "ET7", "ES6", "ES8"],
+  Zeekr: ["001", "009", "X"],
+  Smart: ["#1", "#3"],
+  Honda: ["Civic", "Jazz", "CR-V", "HR-V", "Accord", "ZR-V"],
+  Hyundai: ["i10", "i20", "i30", "Tucson", "Santa Fe", "Kona", "Bayon", "Ioniq 5", "Ioniq 6"],
+  SEAT: ["Ibiza", "Leon", "Arona", "Ateca", "Tarraco"],
+  "Škoda": ["Octavia", "Superb", "Fabia", "Kodiaq", "Karoq", "Kamiq", "Enyaq", "Scala"],
+  Renault: ["Clio", "Captur", "Megane", "Zoe", "Arkana", "Kadjar", "Austral", "Scenic"],
+  Peugeot: ["208", "2008", "308", "3008", "5008", "508", "108", "Rifter"],
+  "Citroën": ["C3", "C4", "C5 Aircross", "Berlingo", "C1", "C3 Aircross", "C4 Cactus"],
+  Volvo: ["XC40", "XC60", "XC90", "V60", "S60", "V40", "S90", "V90", "EX30"],
+  Jaguar: ["XE", "XF", "F-Pace", "F-Type", "E-Pace", "XJ", "I-Pace"],
+  "Land Rover": [
+    "Discovery",
+    "Discovery Sport",
+    "Range Rover Evoque",
+    "Range Rover Sport",
+    "Defender",
+    "Range Rover",
+    "Range Rover Velar",
+    "Freelander",
+  ],
+  Mini: ["Cooper", "Clubman", "Countryman", "Convertible", "Hatch", "Electric"],
+  Porsche: ["911", "Cayman", "Boxster", "Macan", "Panamera", "Cayenne", "Taycan"],
+  Lexus: ["IS", "ES", "NX", "RX", "UX", "CT", "GS", "LBX"],
+  Dacia: ["Sandero", "Duster", "Jogger", "Spring"],
+  Suzuki: ["Swift", "Vitara", "Ignis", "S-Cross", "Jimny", "Baleno", "Swace"],
+  Mazda: ["Mazda2", "Mazda3", "Mazda6", "CX-3", "CX-5", "MX-5", "CX-30", "CX-60", "MX-30"],
+  Jeep: ["Renegade", "Compass", "Wrangler", "Grand Cherokee", "Avenger"],
+  "Alfa Romeo": ["Giulia", "Giulietta", "Stelvio", "MiTo", "Tonale"],
+  Fiat: ["500", "500X", "Panda", "Tipo", "500L", "600"],
+  Subaru: ["Impreza", "Forester", "Outback", "BRZ", "WRX", "Levorg", "XV"],
+  Mitsubishi: ["Lancer", "Outlander", "ASX", "Eclipse Cross", "Mirage"],
 } as const satisfies Record<string, readonly string[]>;
 
 /** Makes we offer in the demo fleet (dropdown order = declaration order). */

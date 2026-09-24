@@ -27,8 +27,8 @@ check() { # route  marker...
 }
 
 # --- 21 top-level routes ---
-check "/"                    "Wheels That Fit." "Alloy Wheels, Tyres"
-check "/fitment"             "Find Wheels For My Car"
+check "/"                    "Tyres That Fit." "Alloy Wheels, Tyres"
+check "/fitment"             "Find The Right Tyres"
 check "/wheels"              "Alloy Wheels UK"
 check "/tyres"               "Tyres UK"
 check "/packages"            "Tyre Packages UK"

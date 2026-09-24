@@ -43,8 +43,10 @@ import { createFitsProvider, mapFitmentOptions } from "../src/lib/reglookup-fits
 import { createLiveProvider, LIVE_PROVIDER_ID } from "../src/lib/reglookup-live";
 // Demo fleet ↔ product fitment records (the dropdown → verdict flow).
 import { DEMO_FLEET, demoProvider, modelsForMake } from "../src/lib/reglookup-demo";
-import { demoPackages, demoWheels } from "../src/data/products";
+import { demoPackages, demoTypes, demoWheels } from "../src/data/products";
 import { checkVehicleFitment } from "../src/components/FitmentChecker";
+// The dual search (tyres + wheels for one vehicle) used by the site.
+import { fitmentResultsFor } from "../src/lib/fitment-results";
 
 let pass = 0;
 let fail = 0;
@@ -480,21 +482,60 @@ check("Netlify entry point (committed template, no key) honestly reports 503 not
 // a model which is not listed still gets the honest non-match.
 console.log("--- demo fleet / fitment records ---");
 const fleetMakes = Object.keys(DEMO_FLEET);
-/** The owner's brief: a full, believable UK lineup per make. */
+/**
+ * Exact make → model counts for the demo fleet.
+ *
+ * The first 13 makes (Audi … Vauxhall) are the ORIGINAL fleet — every one of
+ * their model strings must stay exactly as it was, because existing product
+ * fitment records, live database rows and bookmarked model selections all match
+ * by string equality. BYD's two additions and the 27 makes below it are the
+ * owner's 2026-09-17 expansion (Tesla / Xpeng / Polestar / NIO / Zeekr / Smart +
+ * broad UK coverage). A count here is a cheap tripwire: adding or dropping a
+ * model without updating it fails the suite.
+ */
 const EXPECTED_FLEET_COUNTS: Record<string, number> = {
+  // ── original 13 (unchanged, apart from BYD's two new models) ──
   Audi: 23,
   BMW: 20,
-  "Mercedes-Benz": 16,
-  Volkswagen: 10,
-  Nissan: 8,
-  Toyota: 8,
-  Ford: 8,
-  Kia: 6,
-  MG: 5,
-  Vauxhall: 6,
-  BYD: 5,
+  BYD: 7,
   Changan: 4,
   Chery: 3,
+  Ford: 8,
+  Kia: 6,
+  "Mercedes-Benz": 16,
+  MG: 5,
+  Nissan: 8,
+  Toyota: 8,
+  Volkswagen: 10,
+  Vauxhall: 6,
+  // ── added 2026-09-17: electric-first + broad UK coverage ──
+  Tesla: 4,
+  Xpeng: 3,
+  Polestar: 3,
+  NIO: 4,
+  Zeekr: 3,
+  Smart: 2,
+  Honda: 6,
+  Hyundai: 9,
+  SEAT: 5,
+  "Škoda": 8,
+  Renault: 8,
+  Peugeot: 8,
+  "Citroën": 7,
+  Volvo: 9,
+  Jaguar: 7,
+  "Land Rover": 8,
+  Mini: 6,
+  Porsche: 7,
+  Lexus: 8,
+  Dacia: 4,
+  Suzuki: 7,
+  Mazda: 9,
+  Jeep: 5,
+  "Alfa Romeo": 5,
+  Fiat: 6,
+  Subaru: 7,
+  Mitsubishi: 5,
 };
 const actualCounts = Object.fromEntries(fleetMakes.map((m) => [m, modelsForMake(m).length]));
 const fleetTotal = fleetMakes.reduce((n, m) => n + modelsForMake(m).length, 0);
@@ -509,7 +550,7 @@ check(
   Object.entries(EXPECTED_FLEET_COUNTS).every(([m, n]) => modelsForMake(m).length === n),
   JSON.stringify(actualCounts),
 );
-check("122 models across the fleet", fleetTotal === 122, String(fleetTotal));
+check("287 models across the fleet (was 122)", fleetTotal === 287, String(fleetTotal));
 check(
   "no duplicate or blank model strings in any make",
   fleetMakes.every((m) => {
@@ -529,9 +570,37 @@ const MUST_HAVE: Record<string, string[]> = {
   Kia: ["EV6", "Sorento"],
   MG: ["MG3", "MG5"],
   Vauxhall: ["Insignia", "Grandland"],
-  BYD: ["Han", "Tang"],
+  BYD: ["Atto 3", "Dolphin", "Seal", "Han", "Tang", "Seal U", "Sealion 7"],
   Changan: ["UNI-V", "UNI-K"],
   Chery: ["Tiggo 7", "Tiggo 8"],
+  // The makes/models the owner named for the expansion (2026-09-17).
+  Tesla: ["Model 3", "Model Y", "Model S", "Model X"],
+  Xpeng: ["G6", "G9", "P7"],
+  Polestar: ["2", "3", "4"],
+  NIO: ["ET5", "ET7", "ES6", "ES8"],
+  Zeekr: ["001", "009", "X"],
+  Smart: ["#1", "#3"],
+  Honda: ["Civic", "Jazz", "CR-V"],
+  Hyundai: ["i20", "Tucson", "Ioniq 5"],
+  "Škoda": ["Octavia", "Superb", "Kodiaq"],
+  Peugeot: ["208", "3008"],
+  Volvo: ["XC40", "XC90"],
+  "Land Rover": ["Defender", "Range Rover Evoque"],
+  Porsche: ["911", "Macan"],
+  Lexus: ["IS", "RX"],
+  Mazda: ["Mazda3", "CX-5", "MX-5"],
+  Dacia: ["Sandero", "Duster"],
+  Suzuki: ["Swift", "Vitara"],
+  "Alfa Romeo": ["Giulia", "Stelvio"],
+  Fiat: ["500", "Panda"],
+  Subaru: ["Impreza", "Forester"],
+  Mitsubishi: ["Lancer", "Outlander"],
+  Renault: ["Clio", "Captur"],
+  "Citroën": ["C3", "Berlingo"],
+  SEAT: ["Ibiza", "Leon"],
+  Jaguar: ["XE", "F-Pace"],
+  Mini: ["Cooper", "Countryman"],
+  Jeep: ["Renegade", "Wrangler"],
 };
 const missingBriefed = Object.entries(MUST_HAVE).flatMap(([m, list]) =>
   list.filter((x) => !modelsForMake(m).includes(x)).map((x) => `${m} ${x}`),
@@ -545,8 +614,11 @@ check(
     modelsForMake("Volkswagen").includes("Golf") &&
     modelsForMake("Nissan").includes("Qashqai"),
 );
-// Records ↔ fleet: every record must be selectable in the dropdown.
-const allFitmentProducts = [...demoWheels, ...demoPackages];
+// Records ↔ fleet: every record must be selectable in the dropdown. Covers
+// wheels, TYRES (they carry sample records since the tyres-first change) and
+// packages — a record that isn't a dropdown option is an orphan the UI can never
+// reach, and it would silently break the "no record yet" honest path.
+const allFitmentProducts = [...demoWheels, ...demoTypes, ...demoPackages];
 const withRecords = allFitmentProducts.filter((p) => (p.vehicleFitments ?? []).length > 0);
 const orphanRecords = allFitmentProducts.flatMap((p) =>
   (p.vehicleFitments ?? [])
@@ -599,6 +671,70 @@ check(
   "Apex A-7: the 5x100 record matches old Golfs only",
   verdictFor(wheelById("w-apex-a7-18"), "Volkswagen", "Golf", 2000) === "compatible" &&
     verdictFor(wheelById("w-apex-a7-18"), "Volkswagen", "Golf", 2022) === "not-listed",
+);
+
+// ── TYRES AS THE MAIN LINE: the same vehicle must answer for BOTH lines ─────
+// Owner direction 2026-09-17 — tyres are the main product, wheels the bonus
+// line, and one make/model selection has to produce matches for both. These
+// round-trips run through the SAME `checkVehicleFitment` verdict the product
+// pages use, so a tyre and a wheel answer for the same vehicle the same way.
+const tyreById = (id: string) => demoTypes.find((t) => t.id === id);
+check("every tyre carries sample fitment records", demoTypes.every((t) => (t.vehicleFitments ?? []).length > 0));
+check("Tesla Model 3 → a TYRE verdict (SP-02 XL)", verdictFor(tyreById("t-strada-sp02"), "Tesla", "Model 3") === "compatible");
+check("Tesla Model 3 → a WHEEL verdict (Vortex VX-9)", verdictFor(VX9, "Tesla", "Model 3") === "compatible");
+check("Xpeng G6 → a TYRE verdict (SP-01)", verdictFor(tyreById("t-strada-sp01"), "Xpeng", "G6") === "compatible");
+check("Xpeng G6 → a WHEEL verdict (Forza R1)", verdictFor(wheelById("w-forza-r1-18"), "Xpeng", "G6") === "compatible");
+check("Polestar 2 → a WHEEL verdict (Turbo T-6)", verdictFor(wheelById("w-turbo-t6-19"), "Polestar", "2") === "compatible");
+check("Polestar 2 → a TYRE verdict (SP-02 XL)", verdictFor(tyreById("t-strada-sp02"), "Polestar", "2") === "compatible");
+check("BYD Seal → a TYRE verdict (SP-01)", verdictFor(tyreById("t-strada-sp01"), "BYD", "Seal") === "compatible");
+check("Zeekr 001 → a WHEEL verdict (Track Day pack)", verdictFor(pkgById("pkg-track-day"), "Zeekr", "001") === "compatible");
+check(
+  "the EV makes were NOT bolted onto the small-car wheel patterns",
+  ["w-grip-g9-16", "w-apex-a7-18", "w-drifter-d5-17"].every((id) =>
+    ["Tesla Model 3", "Xpeng G6", "Polestar 2", "NIO ET5"].every(
+      (v) => verdictFor(wheelById(id), v.split(" ")[0], v.split(" ").slice(1).join(" ")) === "not-listed",
+    ),
+  ),
+);
+check(
+  "a 16\" tyre is not claimed for a large EV → honest 'not-listed'",
+  verdictFor(tyreById("t-allgrip-ag4"), "Tesla", "Model 3") === "not-listed",
+);
+// The dual-results helper the homepage search and /fitment both render.
+const dualTesla = fitmentResultsFor({ make: "Tesla", model: "Model 3", year: 2022 });
+const dualXpeng = fitmentResultsFor({ make: "Xpeng", model: "G6" });
+check(
+  "dual search: Tesla Model 3 returns tyres AND wheels",
+  dualTesla.tyres.items.length > 0 && dualTesla.wheels.items.length > 0,
+  `${dualTesla.tyres.items.length} tyres / ${dualTesla.wheels.items.length} wheels`,
+);
+check(
+  "dual search: Xpeng G6 returns tyres AND wheels",
+  dualXpeng.tyres.items.length > 0 && dualXpeng.wheels.items.length > 0,
+  `${dualXpeng.tyres.items.length} tyres / ${dualXpeng.wheels.items.length} wheels`,
+);
+check(
+  "dual search: every tyre/wheel listed is genuinely compatible",
+  dualTesla.tyres.items.every(
+    (t) => checkVehicleFitment(t.vehicleFitments, "Tesla", "Model 3", 2022).kind === "compatible",
+  ) &&
+    dualTesla.wheels.items.every(
+      (w) => checkVehicleFitment(w.vehicleFitments, "Tesla", "Model 3", 2022).kind === "compatible",
+    ),
+);
+check(
+  "dual search: an unknown vehicle yields EMPTY groups (never an invented match)",
+  (() => {
+    const r = fitmentResultsFor({ make: "Tesla", model: "Cybertruck" });
+    return r.tyres.items.length === 0 && r.wheels.items.length === 0 && r.packages.items.length === 0;
+  })(),
+);
+check(
+  "dual search: a make we hold no records for still reports the honest counts",
+  (() => {
+    const r = fitmentResultsFor({ make: "NotAMake", model: "NotAModel" });
+    return r.tyres.withRecords > 0 && r.tyres.items.length === 0 && r.wheels.items.length === 0;
+  })(),
 );
 // The plate path is untouched: no vehicle is ever invented from a registration.
 const demoPlate = await demoProvider.lookupVehicleByReg("AB12CDE");

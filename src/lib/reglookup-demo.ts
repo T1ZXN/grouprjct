@@ -94,6 +94,34 @@ export const DEMO_FITMENT_PROFILES: Record<string, DemoFitmentProfile> = {
   Toyota: { width: "7.5J", pcd: "5x114.3", offset: "ET40–ET50" },
   Volkswagen: { width: "7.5J", pcd: "5x112", offset: "ET40–ET50" },
   Vauxhall: { width: "7J", pcd: "5x105", offset: "ET40–ET50" },
+  /* ── Added with the 2026-09-17 fleet expansion. These are the well-known
+   * family patterns for the new makes; the makes we do NOT have a confirmed
+   * sample pattern for (NIO, Xpeng, Zeekr) fall through to the generic sample
+   * profile below rather than us guessing a geometry we haven't verified. */
+  Tesla: { width: "8.5J", pcd: "5x114.3", offset: "ET35–ET45" },
+  Polestar: { width: "8J", pcd: "5x108", offset: "ET45–ET55" },
+  Smart: { width: "7.5J", pcd: "5x112", offset: "ET40–ET50" },
+  Honda: { width: "7.5J", pcd: "5x114.3", offset: "ET40–ET50" },
+  Hyundai: { width: "7.5J", pcd: "5x114.3", offset: "ET40–ET50" },
+  SEAT: { width: "7.5J", pcd: "5x112", offset: "ET40–ET50" },
+  "Škoda": { width: "7.5J", pcd: "5x112", offset: "ET40–ET50" },
+  Renault: { width: "7.5J", pcd: "5x114.3", offset: "ET40–ET50" },
+  Peugeot: { width: "7.5J", pcd: "5x108", offset: "ET40–ET50" },
+  "Citroën": { width: "7J", pcd: "5x108", offset: "ET40–ET50" },
+  Volvo: { width: "8J", pcd: "5x108", offset: "ET45–ET55" },
+  Jaguar: { width: "8J", pcd: "5x108", offset: "ET45–ET55" },
+  "Land Rover": { width: "8.5J", pcd: "5x120", offset: "ET40–ET55" },
+  Mini: { width: "7J", pcd: "5x112", offset: "ET45–ET55" },
+  Porsche: { width: "9J", pcd: "5x130", offset: "ET45–ET55" },
+  Lexus: { width: "7.5J", pcd: "5x114.3", offset: "ET40–ET50" },
+  Dacia: { width: "6.5J", pcd: "4x100", offset: "ET40–ET50" },
+  Suzuki: { width: "7J", pcd: "5x114.3", offset: "ET45–ET55" },
+  Mazda: { width: "7.5J", pcd: "5x114.3", offset: "ET45–ET55" },
+  Jeep: { width: "7.5J", pcd: "5x110", offset: "ET40–ET50" },
+  "Alfa Romeo": { width: "7.5J", pcd: "5x110", offset: "ET40–ET50" },
+  Fiat: { width: "6.5J", pcd: "4x98", offset: "ET40–ET50" },
+  Subaru: { width: "7.5J", pcd: "5x114.3", offset: "ET45–ET55" },
+  Mitsubishi: { width: "7.5J", pcd: "5x114.3", offset: "ET40–ET50" },
 };
 
 /** Fallback profile for any make not in the list above. */
@@ -101,7 +129,23 @@ const DEFAULT_PROFILE: DemoFitmentProfile = { width: "7.5J", pcd: "5x112", offse
 
 /** Sample diameters offered per make (diameter options cover every make). */
 function diametersFor(make: string): number[] {
-  const base = { Audi: [17, 18, 19], BMW: [17, 18, 19], BYD: [18, 19], "Mercedes-Benz": [17, 18, 19, 20] };
+  const base = {
+    Audi: [17, 18, 19],
+    BMW: [17, 18, 19],
+    BYD: [18, 19],
+    "Mercedes-Benz": [17, 18, 19, 20],
+    // Added with the fleet expansion — a 16" wheel is not a plausible sample
+    // starting point for the larger electric models.
+    Tesla: [18, 19, 20],
+    Xpeng: [18, 19, 20],
+    Polestar: [19, 20],
+    NIO: [19, 20],
+    Zeekr: [19, 20, 21],
+    Smart: [17, 18, 19],
+    Porsche: [19, 20, 21],
+    "Land Rover": [19, 20, 21],
+    Volvo: [18, 19, 20],
+  };
   return (base as Record<string, number[]>)[make] ?? [16, 17, 18];
 }
 

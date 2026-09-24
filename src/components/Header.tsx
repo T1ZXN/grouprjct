@@ -93,7 +93,7 @@ export function Header() {
 
           {/* Red CTA — always visible, compact label on very small screens */}
           <Link to="/fitment" className="btn btn-red !px-3 !py-2.5 sm:!px-5">
-            <span className="hidden lg:inline">Find Wheels For My Car</span>
+            <span className="hidden lg:inline">Find Tyres &amp; Wheels</span>
             <span className="lg:hidden">Fitment</span>
           </Link>
 
@@ -130,7 +130,7 @@ export function Header() {
               type="search"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search wheels, tyres, packages…"
+              placeholder="Search tyres, wheels, packages…"
               className="field-input"
               autoComplete="off"
             />

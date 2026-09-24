@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Breadcrumb, SpecTable } from "~/components/SpecTable";
 import { StockChip } from "~/components/ProductCard";
+import { FitmentChecker } from "~/components/FitmentChecker";
 import { DEMO_NOTICE, demoTypes, tyreSizeLabel } from "~/data/products";
 import type { Tyre } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
@@ -121,6 +122,19 @@ function TyreDetail({ tyre }: { tyre: Tyre }) {
           />
           <p className="mt-5 text-xs text-steel-dim">{DEMO_NOTICE}</p>
         </div>
+        {/* Will this fit my car? — the SAME checker the wheels use, now that
+            tyres carry sample fitment records (src/data/products.ts). */}
+        <div className="mt-12 max-w-2xl">
+          <FitmentChecker
+            fitments={tyre.vehicleFitments}
+            productName={`${tyre.brand} ${tyre.name} ${tyreSizeLabel(tyre)}`}
+          />
+        </div>
+        <p className="mt-5 max-w-2xl text-xs leading-relaxed text-steel-dim">
+          A tyre size range is guidance from our sample fitment data, not a fitment
+          guarantee. We confirm the exact size and load/speed rating against your
+          vehicle before confirming any order.
+        </p>
       </div>
     </section>
   );
@@ -143,7 +157,7 @@ function TyreNotFound() {
             Back to Tyres
           </Link>
           <Link to="/fitment" className="btn btn-red">
-            Find Wheels For My Car
+            Find Tyres &amp; Wheels For My Car
           </Link>
         </div>
       </div>

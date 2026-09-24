@@ -5,10 +5,16 @@ export interface NavLinkItem {
   to: string;
 }
 
+/**
+ * Primary navigation, in sales-priority order (owner direction 2026-09-17):
+ * TYRES first (the main line, most frequent purchase), then wheels as the
+ * bonus line, then packages and accessories. Wheels stay fully reachable —
+ * they are simply second.
+ */
 export const NAV_LINKS: NavLinkItem[] = [
   { label: "Home", to: "/" },
-  { label: "Wheels", to: "/wheels" },
   { label: "Tyres", to: "/tyres" },
+  { label: "Wheels", to: "/wheels" },
   { label: "Wheel & Tyre Packages", to: "/packages" },
   { label: "Accessories", to: "/accessories" },
   { label: "Fitment Guide", to: "/fitment-guide" },
@@ -25,8 +31,8 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
   {
     title: "Shop",
     links: [
-      { label: "Wheels", to: "/wheels" },
       { label: "Tyres", to: "/tyres" },
+      { label: "Wheels", to: "/wheels" },
       { label: "Wheel & Tyre Packages", to: "/packages" },
       { label: "Accessories", to: "/accessories" },
     ],
@@ -34,7 +40,7 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
   {
     title: "Support",
     links: [
-      { label: "Find Wheels For My Car", to: "/fitment" },
+      { label: "Find Tyres & Wheels For My Car", to: "/fitment" },
       { label: "Delivery", to: "/delivery" },
       { label: "Returns", to: "/returns" },
       { label: "FAQ", to: "/faq" },

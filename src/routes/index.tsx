@@ -15,11 +15,13 @@ import {
   categories,
   DEMO_NOTICE,
   demoPackages,
+  demoTypes,
   featuredWheels,
+  tyreSizeLabel,
   wheelSizeLabel,
 } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
-import { StockChip } from "~/components/ProductCard";
+import { ProductCard, StockChip } from "~/components/ProductCard";
 
 const WHY_CARDS = [
   {
@@ -99,19 +101,23 @@ function Hero() {
       {/* Dark overlay + gradient so the headline always pops on the photo. */}
       <div className="absolute inset-0 bg-gradient-to-t from-night via-night/70 to-night/30" />
       <div className="container-x relative py-24 sm:py-32 lg:py-40">
-        <span className="sample-chip">Premium aftermarket wheels · UK</span>
+        <span className="sample-chip">Premium aftermarket tyres &amp; wheels · UK</span>
         <h1 className="mt-6 max-w-3xl text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
-          Wheels That Fit. <span className="text-race-bright">Style That Stands Out.</span>
+          Tyres That Fit. <span className="text-race-bright">Wheels That Stand Out.</span>
         </h1>
         <p className="mt-5 max-w-xl text-base leading-relaxed text-steel sm:text-lg">
-          Shop aftermarket wheels, tyres and complete wheel packages for your car.
+          Shop performance tyres, aftermarket alloy wheels and complete wheel &amp; tyre packages
+          for your car.
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <Link to="/fitment" className="btn btn-red">
-            Find Wheels For My Car
+          <Link to="/tyres" className="btn btn-red">
+            Shop Tyres
           </Link>
           <Link to="/wheels" className="btn btn-outline">
             Shop Wheels
+          </Link>
+          <Link to="/fitment" className="btn btn-ghost">
+            Find My Fitment
           </Link>
         </div>
       </div>
@@ -125,12 +131,12 @@ function FitmentSection() {
       <div className="container-x py-16 sm:py-24">
         <div className="max-w-3xl">
           <h2 className="section-title uppercase tracking-wide">
-            Find The Right Wheels For Your Car
+            Find The Right Tyres &amp; Wheels For Your Car
           </h2>
           <p className="section-sub">
-            Enter your UK registration, or pick your make, model and year — we'll
-            suggest wheels suited to your car. Demo vehicle data until a live UK
-            plate lookup is connected.
+            Enter your UK registration, or pick your make, model and year — we'll show the tyres,
+            wheels and packages our sample catalogue lists for your car, tyres first. Demo vehicle
+            data until a live UK plate lookup is connected.
           </p>
         </div>
         <div className="mt-8 max-w-4xl">
@@ -174,6 +180,47 @@ function PopularCategories() {
               </div>
             </Link>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FeaturedTyres() {
+  return (
+    <section className="border-t border-line bg-night">
+      <div className="container-x py-16 sm:py-24">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="section-title">Featured Tyres</h2>
+            <p className="section-sub">
+              Our main line — tyres in the sizes UK drivers buy most, matched to your car by
+              registration or by make and model.
+            </p>
+          </div>
+          <span className="sample-chip">Sample data</span>
+        </div>
+        <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {demoTypes.map((t) => (
+            <ProductCard
+              key={t.id}
+              href={`/tyres/${t.id}`}
+              image={t.image}
+              imageAlt={`${t.brand} ${t.name} tyre ${tyreSizeLabel(t)}`}
+              eyebrow={`${t.brand} · ${t.season}`}
+              title={t.name}
+              meta={[tyreSizeLabel(t), `${t.loadIndex} ${t.speedRating}`]}
+              price={formatGBP(t.retailPriceIncVat)}
+              stockStatus={t.stockStatus}
+              dimmed={t.stockStatus === "Out of stock"}
+            />
+          ))}
+        </div>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-steel-dim">{DEMO_NOTICE}</p>
+          <Link to="/tyres" className="btn btn-outline !py-2.5">
+            Shop all tyres
+          </Link>
         </div>
       </div>
     </section>
@@ -320,7 +367,7 @@ function FitmentExplainer() {
           </p>
           <ul className="mt-8 space-y-4">
             {[
-              "We check wheel geometry — diameter, width, PCD, offset and centre bore — against your vehicle's requirements before we recommend anything.",
+              "We check tyre size and wheel geometry — diameter, width, PCD, offset and centre bore — against your vehicle's requirements before we recommend anything.",
               "We verify vehicle compatibility with your exact car before confirming any order. The fitment search is the first step of that check, not a guarantee.",
               "No universal fitting guarantee is claimed: some vehicles need spigot rings, different bolts or minor adjustments, and each setup is checked individually.",
             ].map((item) => (
@@ -332,7 +379,7 @@ function FitmentExplainer() {
           </ul>
           <div className="mt-8 text-center">
             <Link to="/fitment" className="btn btn-red">
-              Find Wheels For My Car
+              Find Tyres &amp; Wheels For My Car
             </Link>
           </div>
         </div>
@@ -443,6 +490,7 @@ function Home() {
       <Hero />
       <FitmentSection />
       <PopularCategories />
+      <FeaturedTyres />
       <FeaturedWheels />
       <Packages />
       <WhyChoose />
