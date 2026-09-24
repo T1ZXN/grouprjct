@@ -36,10 +36,11 @@
   body {
     @apply bg-night text-white antialiased;
   }
-  /* Charcoal-wall texture behind the whole site — generated in the hero's warm
-   * charcoal palette (soft plaster slabs + fine grain), fixed so every page
-   * reads as the hero's wall. Content sections are translucent enough for the
-   * texture to show through without hurting readability. */
+  /* Wall texture behind the whole site — the owner's grunge-wall texture
+   * (public/images/wall-texture.jpg), fixed at ~50% overlay so every page
+   * reads as a textured wall rather than flat charcoal. Content sections are
+   * translucent enough for the texture to show through without hurting
+   * readability; the hero photo is untouched (it sits on top of this layer). */
   body::before {
     content: "";
     position: fixed;
@@ -47,9 +48,20 @@
     z-index: -1;
     pointer-events: none;
     background-image: url("/images/wall-texture.jpg");
-    background-size: 150% 150%;
+    background-size: cover;
     background-position: center center;
-    opacity: 0.55;
+    opacity: 0.5;
+  }
+  /* The top banner (logo + sign in) and footer keep the same texture at the
+   * same 50% overlay, pre-baked over the solid charcoal (wall-texture-solid.jpg)
+   * so fixed surfaces stay opaque to scrolled content — no ghosting. Fixed
+   * attachment keeps the pattern seamless with the page layer while scrolling. */
+  header,
+  footer {
+    background-image: url("/images/wall-texture-solid.jpg");
+    background-size: cover;
+    background-position: center center;
+    background-attachment: fixed;
   }
   ::selection {
     @apply bg-race text-white;
