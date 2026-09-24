@@ -9,12 +9,12 @@
  * like bg-night, bg-carbon, bg-coal, text-steel, bg-race, border-line...
  */
 @theme {
-  /* Page background: charcoal grey (owner: not black), rendered slightly
-   * translucent so the fixed charcoal-wall wash behind the page shows through
-   * as a low overlay. Header/footer stay fully solid via --color-night-solid. */
-  --color-night: rgb(24 24 28 / 0.88);
-  --color-carbon: rgb(34 34 40 / 0.92); /* section background (one step lighter) */
-  --color-coal: rgb(42 42 49 / 0.96); /* raised cards / panels / inputs */
+  /* Page background: charcoal grey (owner: not black), rendered translucent so
+   * the fixed charcoal-wall texture behind the page shows through. Header/
+   * footer stay fully solid via --color-night-solid. */
+  --color-night: rgb(24 24 28 / 0.78);
+  --color-carbon: rgb(34 34 40 / 0.85); /* section background (one step lighter) */
+  --color-coal: rgb(42 42 49 / 0.93); /* raised cards / panels / inputs */
   --color-night-solid: #18181c; /* solid page charcoal (header / footer / any surface that must never ghost content) */
   --color-line: #ffffff1f; /* subtle 12% white borders */
   --color-race: #e10600; /* brand red accent */
@@ -36,19 +36,20 @@
   body {
     @apply bg-night text-white antialiased;
   }
-  /* Charcoal-wall wash behind the whole site — the hero's own wall photo,
-   * blurred and toned to near-black, fixed so every page reads as a subtle
-   * "charcoal wall, low overlay" (never as a photo of the car). */
+  /* Charcoal-wall texture behind the whole site — generated in the hero's warm
+   * charcoal palette (soft plaster slabs + fine grain), fixed so every page
+   * reads as the hero's wall. Content sections are translucent enough for the
+   * texture to show through without hurting readability. */
   body::before {
     content: "";
     position: fixed;
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background-image: url("/images/wall-wash.jpg");
-    background-size: cover;
+    background-image: url("/images/wall-texture.jpg");
+    background-size: 150% 150%;
     background-position: center center;
-    opacity: 0.5;
+    opacity: 0.55;
   }
   ::selection {
     @apply bg-race text-white;
