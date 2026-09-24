@@ -13,6 +13,9 @@ import {
   modelsForMake,
 } from "~/lib/reglookup";
 import type { FitmentOption, Vehicle } from "~/lib/reglookup";
+import { fitmentResultsFor } from "~/lib/fitment-results";
+import type { VehicleFitmentResults } from "~/lib/fitment-results";
+import { FitmentMatches } from "~/components/FitmentMatches";
 import { CheckIcon } from "~/components/icons";
 
 interface FitmentResult {
@@ -25,11 +28,24 @@ interface FitmentResult {
   notice: string;
   /** True when the plate couldn't be resolved (no live reg API configured). */
   regUnavailable: boolean;
+  /** Tyres / wheels / packages that fit — BOTH lines, from sample records. */
+  matches: VehicleFitmentResults | null;
 }
 
 /**
- * "Find The Right Wheels For Your Car" search — registration plate input,
- * make/model/year selects and a wheel-diameter select.
+ * The dual-line result set for a resolved vehicle (tyres first, then wheels and
+ * packages), drawn from the products' own SAMPLE fitment records via the same
+ * verdict logic the product pages use.
+ */
+const matchesFor = (vehicle: {
+  make: string;
+  model: string;
+  year?: number;
+}): VehicleFitmentResults => fitmentResultsFor(vehicle);
+
+/**
+ * "Find The Right Tyres & Wheels For Your Car" search — registration plate
+ * input, make/model/year selects and a wheel-diameter select.
  *
  * Runs entirely on the vehicle-lookup provider layer (`src/lib/reglookup.ts`).
  * The plate path is LIVE in the shipped build — it calls the site's own
@@ -39,6 +55,10 @@ interface FitmentResult {
  *   - manual make/model/year searches return sample fitment options · always
  *     with the "Sample fitment data — we confirm compatibility before you
  *     order" notice.
+ *   - once a vehicle is resolved (manually, or from a live plate match) the
+ *     result also lists the TYRES, WHEELS and PACKAGES whose sample fitment
+ *     records cover it — tyres first, since they are the main line
+ *     (src/lib/fitment-results.ts, same verdict logic as the product pages).
  * With nothing configured (env-less build) the layer falls back to honest demo
  * mode and labels every result — no redesign is needed for either case.
  */
@@ -71,7 +91,8 @@ export function FitmentSearch() {
       if (plate) {
         const outcome = await lookupVehicleByReg(plate);
         if (outcome.status === "matched" && outcome.vehicle) {
-          // Live provider resolved the plate → show its fitment options.
+          // Live provider resolved the plate → show its fitment options AND the
+          // dual-line results (tyres + wheels) for the vehicle it named.
           const fits = await getFitments(
             outcome.vehicle.make,
             outcome.vehicle.model,
@@ -85,9 +106,15 @@ export function FitmentSearch() {
             options: fits.options,
             notice: fits.notice,
             regUnavailable: false,
+            matches: matchesFor({
+              make: outcome.vehicle.make,
+              model: outcome.vehicle.model,
+              year: outcome.vehicle.year,
+            }),
           });
         } else {
-          // No live reg API (or no match): honest notice, NO fabricated car.
+          // No live reg API (or no match): honest notice, NO fabricated car —
+          // and therefore no fabricated results either.
           setResult({
             vehicle: null,
             via: "registration",
@@ -95,6 +122,7 @@ export function FitmentSearch() {
             options: [],
             notice: outcome.notice,
             regUnavailable: true,
+            matches: null,
           });
         }
       } else {
@@ -109,6 +137,11 @@ export function FitmentSearch() {
           options: fits.options,
           notice: fits.notice,
           regUnavailable: false,
+          matches: matchesFor({
+            make: fits.make,
+            model: fits.model,
+            year: fits.year ?? 2021,
+          }),
         });
       }
     } catch (err) {
@@ -289,13 +322,22 @@ export function FitmentSearch() {
                 {diameter ? ` · ${diameter}" wheels` : ""}
               </p>
             </div>
-            <Link
-              to="/wheels"
-              search={{ vehicle: `${result.vehicle.make} ${result.vehicle.model} (${result.vehicle.year})` }}
-              className="btn btn-red shrink-0"
-            >
-              View wheels for this car
-            </Link>
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+              <Link
+                to="/tyres"
+                search={{ vehicle: `${result.vehicle.make} ${result.vehicle.model} (${result.vehicle.year})` }}
+                className="btn btn-red !py-2.5"
+              >
+                View tyres for this car
+              </Link>
+              <Link
+                to="/wheels"
+                search={{ vehicle: `${result.vehicle.make} ${result.vehicle.model} (${result.vehicle.year})` }}
+                className="btn btn-outline !py-2.5"
+              >
+                View wheels for this car
+              </Link>
+            </div>
           </div>
           {result.options.length > 0 && (
             <ul className="mt-4 flex flex-wrap gap-2">
@@ -309,6 +351,7 @@ export function FitmentSearch() {
               ))}
             </ul>
           )}
+          {result.matches && <FitmentMatches result={result.matches} />}
           <p className="mt-3 flex items-center gap-1.5 text-xs text-steel-dim">
             <CheckIcon className="h-3.5 w-3.5" />
             We verify compatibility with your exact vehicle before confirming any order.

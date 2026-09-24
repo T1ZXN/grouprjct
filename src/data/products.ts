@@ -121,6 +121,15 @@ export interface Tyre {
   stockStatus: StockStatus;
   image: string;
   description: string;
+  /**
+   * SAMPLE model-level fitment records (see VehicleFitment) — the models this
+   * tyre SIZE plausibly serves in our sample fleet, built with the same
+   * `fleetFitments()` builder the wheels use so a model string can never drift
+   * from the make/model dropdown. Demo data only: a size range is not a fitment
+   * guarantee, and we confirm the exact size against the vehicle before
+   * confirming an order.
+   */
+  vehicleFitments?: VehicleFitment[];
 }
 
 export interface WheelPackage {
@@ -172,6 +181,25 @@ export interface Accessory {
 }
 
 const retail = (supplierEur: number): number => round2(retailPriceIncVat(supplierEur));
+
+/**
+ * SAMPLE fitment spread for the EV-first fleet (owner direction 2026-09-17).
+ *
+ * The electric makes added to the fleet (Tesla, Xpeng, Polestar, NIO, Zeekr,
+ * Smart) are overwhelmingly 5x112 / 5x114.3 / 5x120, so they are added to the
+ * German-compatible wheels and the Track Day pack — NEVER to the small-car
+ * patterns (Grip G-9 is 4x100, Apex A-7 is 5x100, Drifter D-5 is 5x108), which
+ * keep their original records exactly as they were. Sample records only: the
+ * exact geometry is verified against the vehicle before any order is confirmed.
+ */
+const EV_MAKE_FITMENTS: VehicleFitment[] = [
+  ...fleetFitments("Tesla", ["Model 3", "Model Y", "Model S", "Model X"]),
+  ...fleetFitments("Xpeng", ["G6", "G9", "P7"]),
+  ...fleetFitments("Polestar", ["2", "3", "4"]),
+  ...fleetFitments("NIO", ["ET5", "ET7", "ES6", "ES8"]),
+  ...fleetFitments("Zeekr", ["001", "009", "X"]),
+  ...fleetFitments("Smart", ["#1", "#3"]),
+];
 
 /** 6 sample wheels (4 unique images; extras reuse images illustratively). */
 export const demoWheels: Wheel[] = [
@@ -228,6 +256,7 @@ export const demoWheels: Wheel[] = [
         "GLE",
       ]),
       ...fleetFitments("Volkswagen", ["Golf R", "Passat", "Tiguan", "T-Roc", "Arteon"]),
+      ...EV_MAKE_FITMENTS,
     ],
   },
   {
@@ -285,6 +314,7 @@ export const demoWheels: Wheel[] = [
       ...fleetFitments("Volkswagen", ["Golf", "Golf R", "Passat", "Tiguan", "T-Roc", "Arteon"]),
       ...fleetFitments("Nissan", ["Micra", "Juke", "X-Trail", "Leaf", "Ariya"]),
       ...fleetFitments("Toyota", ["RAV4", "C-HR", "Camry", "Supra"]),
+      ...EV_MAKE_FITMENTS,
     ],
   },
   {
@@ -355,6 +385,7 @@ export const demoWheels: Wheel[] = [
       ...fleetFitments("Audi", ["A4", "A5", "A6", "Q3", "Q5"]),
       ...fleetFitments("Mercedes-Benz", ["A-Class", "C-Class", "E200", "GLC"]),
       ...fleetFitments("Volkswagen", ["Golf", "Passat", "Tiguan", "Arteon"]),
+      ...EV_MAKE_FITMENTS,
     ],
   },
   {
@@ -384,7 +415,15 @@ export const demoWheels: Wheel[] = [
   },
 ];
 
-/** 3 sample tyres (all use one illustrative tyre image for now). */
+/**
+ * 3 sample tyres (all use one illustrative tyre image for now).
+ *
+ * Each tyre now carries SAMPLE fitment records: the models its SIZE plausibly
+ * serves, built from the shared demo fleet (`fleetFitments()`), so "tyres that
+ * fit my car" and "wheels that fit my car" both work off the same fleet list.
+ * A tyre size range is guidance, never a fitment guarantee — the site always
+ * confirms the exact size against the vehicle before confirming an order.
+ */
 export const demoTypes: Tyre[] = [
   {
     id: "t-strada-sp01",
@@ -403,6 +442,47 @@ export const demoTypes: Tyre[] = [
     stockStatus: "In Stock",
     image: "/images/category-tyres.jpg",
     description: "High-performance summer tyre for sports and executive cars.",
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. 225/45R18
+    // is a mid-size/executive fitment, so the compact-executive class below is
+    // the plausible spread (hatchbacks and saloons in the 17–18" class, plus the
+    // EV saloons and crossovers that run this size).
+    vehicleFitments: [
+      ...fleetFitments("Audi", ["A3", "A4", "A5", "S3", "Q3"]),
+      ...fleetFitments("BMW", ["1 Series", "3 Series", "4 Series", "X1", "X2"]),
+      ...fleetFitments("Mercedes-Benz", ["A-Class", "A180", "A200", "C-Class", "C180", "C200", "GLA", "GLC"]),
+      ...fleetFitments("Volkswagen", ["Golf", "Golf R", "Passat", "Tiguan", "T-Roc", "Arteon"]),
+      ...fleetFitments("Tesla", ["Model 3", "Model Y"]),
+      ...fleetFitments("Polestar", ["2"]),
+      ...fleetFitments("Xpeng", ["G6"]),
+      ...fleetFitments("NIO", ["ET5"]),
+      ...fleetFitments("Zeekr", ["X"]),
+      ...fleetFitments("Smart", ["#1", "#3"]),
+      ...fleetFitments("BYD", ["Atto 3", "Seal", "Han"]),
+      ...fleetFitments("MG", ["HS", "ZS", "MG4", "MG5"]),
+      ...fleetFitments("Toyota", ["Corolla", "Camry"]),
+      ...fleetFitments("Nissan", ["Qashqai", "Leaf"]),
+      ...fleetFitments("Ford", ["Focus", "Kuga"]),
+      ...fleetFitments("Kia", ["Ceed", "Sportage", "Niro", "EV6"]),
+      ...fleetFitments("Hyundai", ["i30", "Tucson", "Kona", "Ioniq 5"]),
+      ...fleetFitments("Honda", ["Civic", "Accord", "CR-V", "HR-V"]),
+      ...fleetFitments("SEAT", ["Leon", "Ateca"]),
+      ...fleetFitments("Škoda", ["Octavia", "Superb", "Kamiq", "Karoq", "Enyaq"]),
+      ...fleetFitments("Renault", ["Megane", "Arkana", "Kadjar", "Austral"]),
+      ...fleetFitments("Peugeot", ["308", "3008", "508"]),
+      ...fleetFitments("Citroën", ["C4", "C5 Aircross"]),
+      ...fleetFitments("Volvo", ["XC40", "V60", "S60", "V40"]),
+      ...fleetFitments("Jaguar", ["XE", "XF", "E-Pace"]),
+      ...fleetFitments("Mini", ["Cooper", "Clubman", "Countryman"]),
+      ...fleetFitments("Mazda", ["Mazda3", "Mazda6", "CX-30", "CX-5", "MX-30"]),
+      ...fleetFitments("Subaru", ["Impreza", "Forester", "Levorg"]),
+      ...fleetFitments("Vauxhall", ["Astra", "Insignia", "Mokka", "Grandland"]),
+      ...fleetFitments("Mitsubishi", ["Outlander", "Eclipse Cross", "Lancer"]),
+      ...fleetFitments("Lexus", ["IS", "ES", "NX", "UX"]),
+      ...fleetFitments("Alfa Romeo", ["Giulia", "Stelvio", "Giulietta"]),
+      ...fleetFitments("Jeep", ["Compass", "Renegade", "Avenger"]),
+      ...fleetFitments("Changan", ["CS35 Plus", "Eado", "UNI-V", "UNI-K"]),
+      ...fleetFitments("Chery", ["Omoda 5", "Tiggo 7", "Tiggo 8"]),
+    ],
   },
   {
     id: "t-strada-sp02",
@@ -421,6 +501,48 @@ export const demoTypes: Tyre[] = [
     stockStatus: "Available to order",
     image: "/images/category-tyres.jpg",
     description: "Ultra-high-performance summer tyre with reinforced sidewalls.",
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. 235/40R19
+    // is a performance/executive fitment: the larger saloons, hot hatches,
+    // performance SUVs and the bigger EV models.
+    vehicleFitments: [
+      ...fleetFitments("Audi", ["A4", "A5", "A6", "S4", "S5", "Q5"]),
+      ...fleetFitments("BMW", ["3 Series", "4 Series", "5 Series", "M3", "M4", "X3", "X4"]),
+      ...fleetFitments("Mercedes-Benz", ["C-Class", "C63", "E200", "E63", "GLC", "GLE"]),
+      ...fleetFitments("Volkswagen", ["Golf R", "Arteon", "Tiguan", "Touareg"]),
+      ...fleetFitments("Tesla", ["Model 3", "Model Y", "Model S"]),
+      ...fleetFitments("Polestar", ["2"]),
+      ...fleetFitments("Xpeng", ["G6", "G9", "P7"]),
+      ...fleetFitments("NIO", ["ET5", "ET7"]),
+      ...fleetFitments("Zeekr", ["001", "009", "X"]),
+      ...fleetFitments("Smart", ["#1", "#3"]),
+      ...fleetFitments("BYD", ["Seal", "Han"]),
+      ...fleetFitments("Porsche", ["911", "Cayman", "Boxster", "Macan", "Panamera", "Cayenne"]),
+      ...fleetFitments("Jaguar", ["XE", "XF", "F-Pace", "F-Type"]),
+      ...fleetFitments("Land Rover", ["Range Rover Sport", "Range Rover Velar", "Discovery", "Defender"]),
+      ...fleetFitments("Volvo", ["XC60", "XC90", "S60", "V60", "S90", "V90"]),
+      ...fleetFitments("Ford", ["Mustang", "Focus", "Kuga"]),
+      ...fleetFitments("Nissan", ["Qashqai", "X-Trail", "Ariya", "Skyline"]),
+      ...fleetFitments("Toyota", ["Supra", "RAV4", "Camry", "C-HR"]),
+      ...fleetFitments("Kia", ["EV6", "Sportage", "Sorento", "Ceed"]),
+      ...fleetFitments("Hyundai", ["Tucson", "Santa Fe", "Kona", "Ioniq 5", "Ioniq 6"]),
+      ...fleetFitments("Honda", ["Civic", "Accord", "CR-V", "ZR-V"]),
+      ...fleetFitments("MG", ["MG4", "HS", "ZS"]),
+      ...fleetFitments("Škoda", ["Octavia", "Superb", "Kodiaq", "Enyaq"]),
+      ...fleetFitments("SEAT", ["Leon", "Ateca", "Tarraco"]),
+      ...fleetFitments("Peugeot", ["308", "3008", "508"]),
+      ...fleetFitments("Renault", ["Megane", "Arkana"]),
+      ...fleetFitments("Citroën", ["C4", "C5 Aircross"]),
+      ...fleetFitments("Mini", ["Cooper", "Clubman", "Countryman"]),
+      ...fleetFitments("Mazda", ["Mazda3", "Mazda6", "CX-5", "CX-60"]),
+      ...fleetFitments("Subaru", ["WRX", "Forester", "Outback", "BRZ"]),
+      ...fleetFitments("Mitsubishi", ["Outlander", "Eclipse Cross"]),
+      ...fleetFitments("Jeep", ["Compass", "Wrangler", "Grand Cherokee"]),
+      ...fleetFitments("Lexus", ["IS", "ES", "NX", "RX", "GS"]),
+      ...fleetFitments("Alfa Romeo", ["Giulia", "Stelvio"]),
+      ...fleetFitments("Vauxhall", ["Astra", "Insignia", "Grandland"]),
+      ...fleetFitments("Chery", ["Omoda 5", "Tiggo 8"]),
+      ...fleetFitments("Changan", ["UNI-K"]),
+    ],
   },
   {
     id: "t-allgrip-ag4",
@@ -439,6 +561,41 @@ export const demoTypes: Tyre[] = [
     stockStatus: "In Stock",
     image: "/images/category-tyres.jpg",
     description: "All-season tyre offering year-round grip for family cars.",
+    // ⚠️ SAMPLE fitment records — demo data, not a fitment guarantee. 205/55R16
+    // is the compact/family class: superminis, family hatchbacks, small
+    // crossovers and light vans. The big EV models deliberately do NOT appear —
+    // a 16" tyre is not a plausible fitment for them.
+    vehicleFitments: [
+      ...fleetFitments("Audi", ["A1", "A2", "A3", "Q2"]),
+      ...fleetFitments("BMW", ["1 Series", "2 Series"]),
+      ...fleetFitments("Mercedes-Benz", ["A-Class", "A180", "A200", "EQA", "EQB"]),
+      ...fleetFitments("Volkswagen", ["Golf", "Polo", "T-Roc"]),
+      ...fleetFitments("Ford", ["Fiesta", "Focus", "Puma", "Transit"]),
+      ...fleetFitments("Vauxhall", ["Corsa", "Astra", "Mokka", "Vivaro"]),
+      ...fleetFitments("Toyota", ["Yaris", "Aygo", "Corolla"]),
+      ...fleetFitments("Nissan", ["Micra", "Juke", "Qashqai", "Leaf"]),
+      ...fleetFitments("Kia", ["Ceed", "Picanto", "Niro", "Sportage"]),
+      ...fleetFitments("MG", ["MG3", "MG5", "ZS"]),
+      ...fleetFitments("Hyundai", ["i10", "i20", "i30", "Bayon", "Kona"]),
+      ...fleetFitments("Honda", ["Jazz", "Civic"]),
+      ...fleetFitments("SEAT", ["Ibiza", "Leon", "Arona"]),
+      ...fleetFitments("Škoda", ["Fabia", "Scala", "Octavia", "Kamiq"]),
+      ...fleetFitments("Renault", ["Clio", "Captur", "Zoe", "Megane"]),
+      ...fleetFitments("Peugeot", ["208", "2008", "108", "Rifter"]),
+      ...fleetFitments("Citroën", ["C1", "C3", "C3 Aircross", "Berlingo", "C4 Cactus"]),
+      ...fleetFitments("Dacia", ["Sandero", "Duster", "Jogger", "Spring"]),
+      ...fleetFitments("Suzuki", ["Swift", "Vitara", "Ignis", "S-Cross", "Baleno", "Jimny"]),
+      ...fleetFitments("Mazda", ["Mazda2", "CX-3", "MX-5"]),
+      ...fleetFitments("Fiat", ["500", "500X", "Panda", "Tipo", "500L"]),
+      ...fleetFitments("Alfa Romeo", ["MiTo", "Giulietta"]),
+      ...fleetFitments("Subaru", ["Impreza", "XV"]),
+      ...fleetFitments("Mitsubishi", ["ASX", "Lancer", "Mirage"]),
+      ...fleetFitments("Jeep", ["Renegade"]),
+      ...fleetFitments("Lexus", ["CT", "LBX"]),
+      ...fleetFitments("Mini", ["Cooper", "Hatch", "Convertible", "Electric"]),
+      ...fleetFitments("Volvo", ["V40"]),
+      ...fleetFitments("BYD", ["Dolphin"]),
+    ],
   },
 ];
 
@@ -467,6 +624,7 @@ export const demoPackages: WheelPackage[] = [
       ...fleetFitments("BMW", ["1 Series", "2 Series", "4 Series", "5 Series", "X1", "X3", "M4"]),
       ...fleetFitments("Mercedes-Benz", ["A-Class", "A180", "C-Class", "GLA", "GLC"]),
       ...fleetFitments("Volkswagen", ["Golf R", "Passat", "Tiguan", "T-Roc"]),
+      ...EV_MAKE_FITMENTS,
     ],
     supplierPriceEur: 624,
     retailPriceIncVat: retail(624),
@@ -604,20 +762,26 @@ export const demoAccessories: Accessory[] = [
   },
 ];
 
+/**
+ * The four product lines, in SALES-PRIORITY order (owner direction 2026-09-17):
+ * tyres first — the most frequent purchase and the main line — then wheels as
+ * the bonus/upsell line, then packages and accessories. Every listing that maps
+ * this array (e.g. the homepage category grid) therefore shows tyres first.
+ */
 export const categories: Category[] = [
-  {
-    slug: "wheels",
-    name: "Wheels",
-    blurb: "Alloy wheels in gloss, matte and machined finishes — 16\" to 20\".",
-    image: "/images/category-wheels.jpg",
-    href: "/wheels",
-  },
   {
     slug: "tyres",
     name: "Tyres",
     blurb: "Performance summer, all-season and winter tyres to match your fitment.",
     image: "/images/category-tyres.jpg",
     href: "/tyres",
+  },
+  {
+    slug: "wheels",
+    name: "Wheels",
+    blurb: "Alloy wheels in gloss, matte and machined finishes — 16\" to 20\".",
+    image: "/images/category-wheels.jpg",
+    href: "/wheels",
   },
   {
     slug: "packages",

@@ -197,7 +197,12 @@ export function productToRow(
       speedRating: t.speedRating,
       season: t.season,
     };
-    fitment = emptyFitment;
+    // Tyres carry sample fitment records too now (owner direction 2026-09-17:
+    // tyres are the main line, and the fitment search serves both lines), so an
+    // imported tyre row keeps whatever records the source provides. An empty
+    // list stays empty — the UI reports "no sample fitment data yet" rather
+    // than inventing one.
+    fitment = { compatibility: [], fitments: t.vehicleFitments ?? [] };
   } else if (p.category === "packages") {
     const pk = p as WheelPackage;
     specs = {

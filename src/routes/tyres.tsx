@@ -7,11 +7,17 @@ import { demoTypes, STOCK_STATUSES, tyreSizeLabel } from "~/data/products";
 import type { Tyre } from "~/data/products";
 import { useLiveCatalogue } from "~/lib/liveCatalogue";
 import { formatGBP } from "~/lib/pricing";
-import { applyPriceSort, SORT_OPTIONS, toSearchString } from "~/lib/catalogue";
+import { applyPriceSort, parseVehicleParam, SORT_OPTIONS, toSearchString } from "~/lib/catalogue";
 import type { PriceSort } from "~/lib/catalogue";
 
 interface TyresSearch {
   q?: string;
+  /**
+   * Vehicle context passed by the fitment search ("Ford Focus (2019)"). Used to
+   * put tyres whose SAMPLE fitment records list that make first, and to show
+   * the honest "sample data" banner — never a fitment guarantee.
+   */
+  vehicle?: string;
   width?: string;
   aspect?: string;
   rim?: string;
@@ -30,6 +36,7 @@ const unique = (values: string[]): string[] => [...new Set(values)];
 export const Route = createFileRoute("/tyres")({
   validateSearch: (search: Record<string, unknown>): TyresSearch => ({
     q: toSearchString(search.q),
+    vehicle: toSearchString(search.vehicle),
     width: toSearchString(search.width),
     aspect: toSearchString(search.aspect),
     rim: toSearchString(search.rim),
@@ -97,7 +104,7 @@ function TyresPage() {
   };
 
   const clearFilters = () => {
-    navigate({ to: "/tyres", search: { q: search.q } });
+    navigate({ to: "/tyres", search: { q: search.q, vehicle: search.vehicle } });
   };
 
   const min = search.priceMin !== undefined ? Number(search.priceMin) : undefined;
@@ -107,7 +114,7 @@ function TyresPage() {
 
   const filtered = useMemo(() => {
     const ql = search.q?.toLowerCase();
-    const list = items.filter((t: Tyre) => {
+    let list = items.filter((t: Tyre) => {
       if (ql) {
         const hay = `${t.brand} ${t.name} ${t.season} ${t.description} ${tyreSizeLabel(t)}`.toLowerCase();
         if (!hay.includes(ql)) return false;
@@ -122,8 +129,20 @@ function TyresPage() {
       if (search.availability && t.stockStatus !== search.availability) return false;
       return true;
     });
+    // ?vehicle= (from the fitment search) — honestly prioritise the tyres whose
+    // SAMPLE fitment records list that make; the banner explains the rest. The
+    // exact size is still verified against the vehicle before any order.
+    const parsed = parseVehicleParam(search.vehicle);
+    const make = parsed?.make?.toLowerCase();
+    if (make && !search.sort) {
+      const listsMake = (t: Tyre) =>
+        (t.vehicleFitments ?? []).some((f) => f.make.toLowerCase() === make);
+      list = [...list.filter(listsMake), ...list.filter((t) => !listsMake(t))];
+    }
     return applyPriceSort(list, search.sort as PriceSort, (t) => t.retailPriceIncVat);
   }, [items, search, hasMin, hasMax, min, max]);
+
+  const parsedVehicle = parseVehicleParam(search.vehicle);
 
   // A child ($id) route is matched (e.g. /tyres/t-strada-sp01) — hand off to
   // the child instead of rendering this list page (this list route is the
@@ -159,6 +178,7 @@ function TyresPage() {
         <SortSelect value={search.sort} onChange={(v) => setFilter("sort", v)} options={SORT_OPTIONS} />
       }
       resultCount={filtered.length}
+      vehicleBanner={parsedVehicle ? `Showing sample tyres for ${parsedVehicle.label}` : undefined}
       emptyMessage="No tyres match your filters — clear filters to see the full sample range."
     >
       <div className="mt-6 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">

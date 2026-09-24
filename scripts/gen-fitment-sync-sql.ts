@@ -15,7 +15,7 @@
  *
  * Usage:  bun ./scripts/gen-fitment-sync-sql.ts > scripts/sync-fitment-records.sql
  */
-import { demoPackages, demoWheels } from "../src/data/products";
+import { demoPackages, demoTypes, demoWheels } from "../src/data/products";
 
 interface FitmentRow {
   id: string;
@@ -24,12 +24,21 @@ interface FitmentRow {
   fitments: unknown[];
 }
 
+// Tyres carry sample fitment records too (owner direction 2026-09-17: tyres are
+// the main line, and the fitment search serves both lines), so the patch covers
+// wheel, tyre AND package rows.
 const rows: FitmentRow[] = [
   ...demoWheels.map((w) => ({
     id: w.id,
     category: "wheels",
     compatibility: w.vehicleCompatibility,
     fitments: w.vehicleFitments ?? [],
+  })),
+  ...demoTypes.map((t) => ({
+    id: t.id,
+    category: "tyres",
+    compatibility: [],
+    fitments: t.vehicleFitments ?? [],
   })),
   ...demoPackages.map((p) => ({
     id: p.id,
