@@ -36,7 +36,10 @@ import {
   DEFAULT_UK_VRM_PROXY_PATH,
   endpointCandidates,
   mapVehicleFromPayload,
+  matchFleetString,
+  normalizeVehicleToFleet,
   REG_LOOKUP_FUNCTION_FALLBACK_PATH,
+  titleCaseVehicleString,
   VEHICLEMATIC_DIRECT_BASE_URL,
 } from "../src/lib/reglookup-ukvrm";
 import { createFitsProvider, mapFitmentOptions } from "../src/lib/reglookup-fits";
@@ -107,9 +110,15 @@ const jsonResponse = (status: number, body: unknown) =>
 
 console.log("== 1. shape mapping ==");
 const mapped = mapVehicleFromPayload(REG_PAYLOAD);
-check("reg payload maps make/model/year", mapped?.make === "FORD" && mapped?.model === "FIESTA" && mapped?.year === 2019,
+check("reg payload maps make/model/year (canonicalised onto the dropdown fleet)", mapped?.make === "Ford" && mapped?.model === "Fiesta" && mapped?.year === 2019,
   JSON.stringify(mapped));
 check("reg payload maps fuel and engine", mapped?.fuel === "PETROL" && mapped?.engine === "1499cc", JSON.stringify(mapped));
+check(
+  "the register's own casing is still reachable (fleet: null opts out)",
+  mapVehicleFromPayload(REG_PAYLOAD, { fleet: null })?.make === "FORD" &&
+    mapVehicleFromPayload(REG_PAYLOAD, { fleet: null })?.model === "FIESTA",
+  JSON.stringify(mapVehicleFromPayload(REG_PAYLOAD, { fleet: null })),
+);
 check("flat payload maps too", mapVehicleFromPayload({ make: "Kia", model: "Sportage", yearOfManufacture: 2020 })?.model === "Sportage");
 check("payload without a model is NOT guessed", mapVehicleFromPayload({ make: "FORD", year_of_manufacture: 2019 }) === undefined);
 check("payload without any year is NOT guessed", mapVehicleFromPayload({ make: "FORD", model: "FIESTA" }) === undefined);
@@ -202,7 +211,7 @@ const okProvider = createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jso
 const ok = await okProvider.lookupVehicleByReg("AB12CDE");
 check("200 -> matched, source live, providerId uk-vrm", ok.status === "matched" && ok.source === "live" && ok.providerId === "uk-vrm", JSON.stringify(ok));
 check("200 -> notice keeps the verify-compatibility promise", /verify exact compatibility/i.test(ok.notice), ok.notice);
-check("200 -> vehicle from the live payload", ok.vehicle?.make === "FORD" && ok.vehicle?.model === "FIESTA", JSON.stringify(ok.vehicle));
+check("200 -> vehicle from the live payload (canonicalised to the fleet)", ok.vehicle?.make === "Ford" && ok.vehicle?.model === "Fiesta", JSON.stringify(ok.vehicle));
 
 const notFound = await createUkVrmProvider({ apiKey: "k", fetchImpl: async () => jsonResponse(404, {}) }).lookupVehicleByReg("AB12CDE");
 check("404 -> no-match with NO vehicle", notFound.status === "no-match" && !notFound.vehicle, JSON.stringify(notFound));
@@ -287,7 +296,7 @@ check("proxy mode needs NO client key: one same-origin call, matched", await (as
   const calls: string[] = [];
   const p = createUkVrmProvider({ fetchImpl: async (u) => { calls.push(u); return jsonResponse(200, PROXY_OK); } });
   const o = await p.lookupVehicleByReg("AB12CDE");
-  return o.status === "matched" && o.vehicle?.make === "FORD" && o.source === "live" && calls.length === 1 && calls[0] === "/api/reglookup/AB12CDE";
+  return o.status === "matched" && o.vehicle?.make === "Ford" && o.source === "live" && calls.length === 1 && calls[0] === "/api/reglookup/AB12CDE";
 })());
 check("proxy call sends NO provider key header — even when a key sits in the env", await (async () => {
   let seen = "";
@@ -317,7 +326,7 @@ check("proxy route missing (HTML from the host) -> falls back to the function pa
     },
   });
   const o = await p.lookupVehicleByReg("AB12CDE");
-  return o.status === "matched" && o.vehicle?.model === "FIESTA" && calls.length === 2 && calls[1] === `${REG_LOOKUP_FUNCTION_FALLBACK_PATH}?vrm=AB12CDE`;
+  return o.status === "matched" && o.vehicle?.model === "Fiesta" && calls.length === 2 && calls[1] === `${REG_LOOKUP_FUNCTION_FALLBACK_PATH}?vrm=AB12CDE`;
 })());
 await expectThrow("proxy route missing everywhere -> honest 'service isn't available', never a vehicle", () =>
   createUkVrmProvider({ fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new Error("<!doctype html>"); } }) as never }).lookupVehicleByReg("AB12CDE"), /isn't available on this site/i);
@@ -745,6 +754,202 @@ check(
 );
 const coveredVariants = new Set(
   withRecords.flatMap((p) => (p.vehicleFitments ?? []).map((f) => `${f.make} ${f.model}`)),
+);
+// ── REAL REGISTER PAYLOAD → DROPDOWN FLEET (deploy pre-validation) ───────────
+// The live provider is wired to the real VehicleMatic vehicle-details endpoint,
+// and the UK record is a DVLA-derived DATASET whose model field arrives in the
+// register's own UPPERCASE derivative style ("3 SERIES"). The dropdown fleet
+// holds "3 Series". This section runs the EXACT 200 body we captured from a real
+// live call through the shipping mapping path — the same functions the site
+// calls — and asserts the resolved vehicle is a real dropdown option that
+// carries a fitment verdict. Fixture is verbatim; no payload is invented here.
+console.log("== 7. REAL VehicleMatic payload → fleet (SA15VPR pre-validation) ==");
+/** VERBATIM 200 body from the live vehicle-details endpoint for SA15VPR (2026-09-17). */
+const VM_SA15VPR_PAYLOAD = {
+  data: {
+    vrm: "SA15VPR",
+    registration_number: "SA15VPR",
+    make: "BMW",
+    model: "3 SERIES",
+    colour: "BLUE",
+    fuel_type: "DIESEL",
+    engine_capacity: 2993,
+    year_of_manufacture: 2015,
+    month_of_first_registration: "2015-04",
+    co2_emissions: 145,
+    tax_status: "Untaxed",
+    tax_due_date: "2026-07-01",
+    mot_status: "Valid",
+    mot_expiry_date: "2027-01-25",
+    wheelplan: "2 AXLE RIGID BODY",
+    export_marker: false,
+  },
+  credit_balance: 120,
+};
+const bmwFleet = modelsForMake("BMW");
+check(
+  "the fixture really is the register's UPPERCASE house style",
+  VM_SA15VPR_PAYLOAD.data.make === "BMW" && VM_SA15VPR_PAYLOAD.data.model === "3 SERIES",
+  JSON.stringify(VM_SA15VPR_PAYLOAD.data),
+);
+check(
+  "the raw upstream model is NOT a dropdown option (this is what we must not ship)",
+  !bmwFleet.includes(VM_SA15VPR_PAYLOAD.data.model),
+  bmwFleet.join(", "),
+);
+const realVehicle = mapVehicleFromPayload(VM_SA15VPR_PAYLOAD);
+check(
+  "real payload → BMW / 3 Series / 2015 (fleet casing), exact match",
+  realVehicle?.make === "BMW" &&
+    realVehicle?.model === "3 Series" &&
+    realVehicle?.year === 2015 &&
+    realVehicle?.modelMatch === "exact" &&
+    realVehicle?.modelMatched === true,
+  JSON.stringify(realVehicle),
+);
+check(
+  "the resolved model IS an exact dropdown option for BMW",
+  bmwFleet.includes(realVehicle?.model ?? ""),
+  `${realVehicle?.model} ∈ [${bmwFleet.join(", ")}]`,
+);
+check(
+  "engine / fuel still mapped from the same real body",
+  realVehicle?.engine === "2993cc" && realVehicle?.fuel === "DIESEL",
+  JSON.stringify(realVehicle),
+);
+// The shipping path: provider → same-origin proxy route → mapped outcome.
+const realProvider = createUkVrmProvider({
+  baseUrl: DEFAULT_UK_VRM_PROXY_PATH,
+  fetchImpl: async () => jsonResponse(200, VM_SA15VPR_PAYLOAD),
+});
+const realOutcome = await realProvider.lookupVehicleByReg("SA15VPR");
+check(
+  "the live provider path returns a matched, fleet-cased BMW 3 Series",
+  realOutcome.status === "matched" &&
+    realOutcome.source === "live" &&
+    realOutcome.vehicle?.make === "BMW" &&
+    realOutcome.vehicle?.model === "3 Series",
+  JSON.stringify(realOutcome),
+);
+// Fitment round-trip on the plate-resolved vehicle (the dual tyre + wheel search).
+const plateResults = fitmentResultsFor(realOutcome.vehicle!);
+check(
+  "plate → TYRE verdicts resolve (SP-01 / SP-02 XL)",
+  plateResults.tyres.items.some((t) => t.id === "t-strada-sp01") &&
+    plateResults.tyres.items.some((t) => t.id === "t-strada-sp02"),
+  plateResults.tyres.items.map((t) => t.id).join(", "),
+);
+check(
+  "plate → WHEEL verdict resolves (Vortex VX-9)",
+  plateResults.wheels.items.some((w) => w.id === "w-vortex-vx9-19"),
+  plateResults.wheels.items.map((w) => w.id).join(", "),
+);
+check(
+  "plate → PACKAGE verdict resolves (Track Day pack)",
+  plateResults.packages.items.some((p) => p.id === "pkg-track-day"),
+  plateResults.packages.items.map((p) => p.id).join(", "),
+);
+check(
+  "every plate-matched item's verdict is 'compatible' via checkVehicleFitment",
+  [...plateResults.tyres.items, ...plateResults.wheels.items, ...plateResults.packages.items].every(
+    (p) => checkVehicleFitment(p.vehicleFitments, "BMW", "3 Series", 2015).kind === "compatible",
+  ),
+);
+check(
+  "the 2015 build year sits inside the year-scoped F30 (2012–2018) record",
+  verdictFor(VX9, "BMW", "3 Series", 2015) === "compatible" &&
+    verdictFor(wheelById("w-forza-r1-18"), "BMW", "3 Series", 2015) === "compatible" &&
+    verdictFor(wheelById("w-forza-r1-18"), "BMW", "3 Series", 1996) === "not-listed",
+);
+// The normaliser's own units (provider house style → fleet option).
+check(
+  "'3 SERIES' → '3 Series' (the case-only fold)",
+  normalizeVehicleToFleet({ make: "BMW", model: "3 SERIES", year: 2015 }).model === "3 Series",
+);
+check(
+  "'QASHQAI ACENTA' → 'Qashqai' (register derivative, leading model tokens)",
+  (() => {
+    const n = normalizeVehicleToFleet({ make: "NISSAN", model: "QASHQAI ACENTA", year: 2019 });
+    return n.make === "Nissan" && n.model === "Qashqai" && n.modelMatch === "derivative";
+  })(),
+);
+check(
+  "'A180 AMG LINE' → Mercedes-Benz A180 (derivative), and the register's own wording is kept",
+  (() => {
+    const n = mapVehicleFromPayload({ data: { make: "MERCEDES-BENZ", model: "A180 AMG LINE", year_of_manufacture: 2019 } });
+    return (
+      n?.make === "Mercedes-Benz" &&
+      n?.model === "A180" &&
+      n?.modelMatch === "derivative" &&
+      n?.variant === "A180 AMG LINE" &&
+      verdictFor(VX9, "Mercedes-Benz", "A180") === "compatible"
+    );
+  })(),
+);
+check(
+  "diacritic make fold: 'SKODA' + 'OCTAVIA 1.6 TDI' → 'Škoda' Octavia",
+  (() => {
+    const n = normalizeVehicleToFleet({ make: "SKODA", model: "OCTAVIA 1.6 TDI", year: 2018 });
+    return n.make === "Škoda" && n.model === "Octavia" && (DEMO_FLEET["Škoda"] ?? []).includes(n.model);
+  })(),
+);
+check(
+  "longest option wins: 'RANGE ROVER SPORT SVR' → 'Range Rover Sport' (not 'Range Rover')",
+  normalizeVehicleToFleet({ make: "LAND ROVER", model: "RANGE ROVER SPORT SVR", year: 2018 }).model ===
+    "Range Rover Sport",
+);
+check(
+  "'GOLF R DSG' → 'Golf R' / 'MODEL 3 LONG RANGE' → 'Model 3'",
+  normalizeVehicleToFleet({ make: "VOLKSWAGEN", model: "GOLF R DSG", year: 2019 }).model === "Golf R" &&
+    normalizeVehicleToFleet({ make: "TESLA", model: "MODEL 3 LONG RANGE", year: 2022 }).model === "Model 3",
+);
+check(
+  "a one-letter option is never used as a prefix (too weak to identify a car)",
+  matchFleetString("X 5", ["X"]).kind === "none" &&
+    normalizeVehicleToFleet({ make: "ZEEKR", model: "X", year: 2024 }).model === "X",
+);
+// Honest no-guess paths — an unmatched string stays on the existing 'not listed'
+// path and is never swapped for a different model.
+check(
+  "an unknown model keeps its readable name and is NOT matched",
+  (() => {
+    const n = normalizeVehicleToFleet({ make: "BMW", model: "Z9 SUPERNOVA", year: 2020 });
+    return n.make === "BMW" && n.model === "Z9 Supernova" && n.modelMatched === false && n.modelMatch === "none";
+  })(),
+);
+check(
+  "…and its verdict stays the honest 'not-listed' (never 'compatible')",
+  verdictFor(VX9, "BMW", "Z9 Supernova", 2020) === "not-listed",
+);
+check(
+  "a model from another make is never borrowed (BMW is not searched for a Golf)",
+  (() => {
+    const n = normalizeVehicleToFleet({ make: "BMW", model: "GOLF R DSG", year: 2019 });
+    return n.makeMatched && n.modelMatched === false && n.model === "Golf R DSG" && verdictFor(VX9, "BMW", n.model) === "not-listed";
+  })(),
+);
+check(
+  "an unknown make keeps its name and is never cross-matched",
+  (() => {
+    const n = normalizeVehicleToFleet({ make: "SAAB", model: "9-3", year: 2008 });
+    return n.make === "Saab" && n.makeMatched === false && n.modelMatched === false && verdictFor(VX9, "Saab", "9-3") === "not-listed";
+  })(),
+);
+check(
+  "title case keeps acronyms and trim codes: 'A180 AMG LINE' / '3 SERIES GRAN TURISMO'",
+  titleCaseVehicleString("A180 AMG LINE") === "A180 AMG Line" &&
+    titleCaseVehicleString("3 SERIES GRAN TURISMO") === "3 Series Gran Turismo",
+);
+// Fleet-wide invariant: every dropdown option is already canonical (so the
+// normaliser can never change a value the fleet itself produces).
+check(
+  "every fleet option maps to itself, exactly (40 makes / 287 models)",
+  Object.entries(DEMO_FLEET).every(([make, models]) =>
+    models.every((model) => {
+      const n = normalizeVehicleToFleet({ make, model, year: 2020 });
+      return n.make === make && n.model === model && n.modelMatch === "exact";
+    }),
+  ),
 );
 console.log(
   `  … ${withRecords.length} products carry sample fitment records covering ${coveredVariants.size} make/model variants`,
