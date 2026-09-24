@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useBasket } from "~/components/BasketProvider";
 import { NAV_LINKS } from "~/lib/nav";
+import { accountMenuModel, customerSignOut } from "~/lib/customerAuth";
+import { useCustomerSession } from "~/lib/useCustomerSession";
 import {
   BasketIcon,
   CloseIcon,
@@ -15,13 +17,30 @@ import {
  * Site header: sticky, dark solid background (brand rule — nav never sits on
  * a busy photo). Row 1 = logo + search/account/basket + red fitment CTA +
  * hamburger (mobile). Row 2 (desktop) = category nav.
+ *
+ * The account control is wired to the CUSTOMER account system
+ * (src/lib/customerAuth.ts + /account): it reads "Sign in" and links to
+ * /account when there is no real session, and shows the account menu
+ * (My account / Sign out) when there is one. Signing out returns to the shop.
+ * The owner's /admin area is NOT reachable from here — it has its own gate.
  */
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [accountOpen, setAccountOpen] = useState(false);
   const { count } = useBasket();
+  const { session, email } = useCustomerSession();
+  const account = accountMenuModel(session);
   const navigate = useNavigate();
+
+  const signOut = async () => {
+    setAccountOpen(false);
+    setMobileOpen(false);
+    await customerSignOut();
+    // Requirement: signing out returns the customer to the shop.
+    await navigate({ to: "/" });
+  };
 
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
@@ -62,15 +81,62 @@ export function Header() {
             <SearchIcon className="h-5 w-5" />
           </button>
 
-          {/* Account — non-functional for now */}
-          <button
-            type="button"
-            aria-label="Account (coming soon)"
-            title="Account — coming soon"
-            className="hidden h-10 w-10 cursor-pointer place-items-center rounded-md text-steel transition-colors hover:text-white sm:grid"
-          >
-            <UserIcon className="h-5 w-5" />
-          </button>
+          {/* Account — real customer session: Sign in, or the account menu */}
+          {account.signedIn ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setAccountOpen((v) => !v)}
+                aria-expanded={accountOpen}
+                aria-haspopup="menu"
+                aria-label="Your account"
+                title="Your account"
+                className="flex h-10 cursor-pointer items-center gap-2 rounded-md px-2 text-steel transition-colors hover:text-white"
+              >
+                <UserIcon className="h-5 w-5" />
+                <span className="hidden max-w-[9rem] truncate text-xs font-semibold sm:inline">
+                  {account.profileLabel}
+                </span>
+              </button>
+              {accountOpen && (
+                <div
+                  role="menu"
+                  aria-label="Account menu"
+                  className="absolute right-0 z-50 mt-1 w-64 rounded-md border border-line bg-carbon p-2 shadow-xl"
+                >
+                  <p className="truncate px-3 py-2 text-[11px] text-steel-dim">
+                    Signed in as <span className="text-steel">{email ?? ""}</span>
+                  </p>
+                  <Link
+                    to="/account"
+                    role="menuitem"
+                    onClick={() => setAccountOpen(false)}
+                    className="block rounded-md px-3 py-2 text-sm font-semibold text-white hover:bg-white/5"
+                  >
+                    {account.profileLabel}
+                  </Link>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={signOut}
+                    className="block w-full cursor-pointer rounded-md px-3 py-2 text-left text-sm font-semibold text-steel hover:bg-white/5 hover:text-white"
+                  >
+                    {account.signOutLabel}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Link
+              to="/account"
+              aria-label="Sign in to your account"
+              title="Sign in or create an account"
+              className="flex h-10 cursor-pointer items-center gap-2 rounded-md px-2 text-steel transition-colors hover:text-white"
+            >
+              <UserIcon className="h-5 w-5" />
+              <span className="hidden text-xs font-semibold sm:inline">{account.triggerLabel}</span>
+            </Link>
+          )}
 
           {/* Basket — real, localStorage-backed count (link to /basket) */}
           <Link
@@ -185,6 +251,34 @@ export function Header() {
                 </Link>
               </li>
             ))}
+            <li className="mt-1 border-t border-line pt-1">
+              {account.signedIn ? (
+                <>
+                  <Link
+                    to="/account"
+                    onClick={() => setMobileOpen(false)}
+                    className="block rounded-md px-3 py-3 text-sm font-semibold text-white hover:bg-white/5"
+                  >
+                    {account.profileLabel}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={signOut}
+                    className="block w-full cursor-pointer rounded-md px-3 py-3 text-left text-sm font-semibold text-steel hover:text-white"
+                  >
+                    {account.signOutLabel}
+                  </button>
+                </>
+              ) : (
+                <Link
+                  to="/account"
+                  onClick={() => setMobileOpen(false)}
+                  className="block rounded-md px-3 py-3 text-sm font-semibold text-white hover:bg-white/5"
+                >
+                  {account.triggerLabel}
+                </Link>
+              )}
+            </li>
           </ul>
         </nav>
       )}

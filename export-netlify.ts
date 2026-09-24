@@ -77,6 +77,7 @@ const TOP_LEVEL = [
   "/accessories",
   "/basket",
   "/checkout",
+  "/account",
   "/about",
   "/contact",
   "/delivery",
