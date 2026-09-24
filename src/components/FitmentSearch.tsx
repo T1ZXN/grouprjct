@@ -321,6 +321,14 @@ export function FitmentSearch() {
                   : "Manual search"}
                 {diameter ? ` · ${diameter}" wheels` : ""}
               </p>
+              {result.via === "registration" && result.vehicle.variant && (
+                /* The live record's model field is a DERIVATIVE string (model +
+                   trim). When we had to read the model out of it, we show the
+                   register's own wording rather than hiding what we interpreted. */
+                <p className="mt-0.5 text-xs text-steel-dim">
+                  The register lists the model as &ldquo;{result.vehicle.variant}&rdquo;.
+                </p>
+              )}
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
               <Link
