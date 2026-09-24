@@ -32,7 +32,7 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-line bg-night">
+    <header className="sticky top-0 z-50 border-b border-line bg-night-solid">
       {/* Row 1 — logo, actions, CTA */}
       <div className="container-x flex h-[112px] items-center justify-between gap-2 sm:gap-4">
         <Link

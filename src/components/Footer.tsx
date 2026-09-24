@@ -8,7 +8,7 @@ import { MailIcon, MapPinIcon, PhoneIcon, SocialIcon } from "~/components/icons"
  */
 export function Footer() {
   return (
-    <footer className="border-t border-line bg-night">
+    <footer className="border-t border-line bg-night-solid">
       <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-5">
         {/* Brand + contact */}
         <div className="lg:col-span-2">
