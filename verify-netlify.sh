@@ -26,7 +26,7 @@ check() { # route  marker...
   if [ "$ok" = 1 ]; then pass=$((pass+1)); echo "PASS 200 $route"; else fail=$((fail+1)); echo "FAIL $code $route"; fi
 }
 
-# --- 21 top-level routes ---
+# --- 22 top-level routes ---
 check "/"                    "Tyres That Fit." "Alloy Wheels, Tyres"
 check "/fitment"             "Find The Right Tyres"
 check "/wheels"              "Alloy Wheels UK"
@@ -47,6 +47,7 @@ check "/fitment-guide"       "Wheel Fitment Guide"
 check "/tyre-safety"         "Tyre Safety Guide"
 check "/wheel-safety"        "Wheel Safety Guide"
 check "/financing"           "Financing"
+check "/account"             "Your N2 Wheels account" "Create account" "noindex, nofollow"
 check "/admin"               "Pricing settings" "noindex, nofollow"
 
 # --- 6 wheel details ---

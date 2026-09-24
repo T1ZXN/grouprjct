@@ -37,6 +37,7 @@ import {
 } from "~/lib/store";
 import { importToCatalogue, importWroteAnything } from "~/lib/importPersistence";
 import type { ImportCatalogueResult } from "~/lib/importPersistence";
+import { adminAccessVerdict, readAdminAllowList } from "~/lib/adminAccess";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -323,6 +324,29 @@ function AdminPage() {
     void supabase?.auth.signOut(); // onAuthStateChange clears the session state
   };
 
+/**
+ * Shown when a signed-in account is NOT on the admin allow-list
+ * (VITE_ADMIN_EMAILS). Customer accounts are authenticated users of the same
+ * Supabase project, so without this check a shop account would see the admin
+ * tooling. With no allow-list configured the behaviour is unchanged.
+ */
+function AdminNoAccess({ onSignOut, message }: { onSignOut: () => void; message: string }) {
+  return (
+    <div className="bg-night">
+      <div className="container-x grid min-h-[70vh] place-items-center py-16">
+        <div className="w-full max-w-md rounded-lg border border-line bg-carbon p-8 text-center">
+          <span className="mx-auto grid h-12 w-12 place-items-center rounded-md bg-race text-xl font-black text-white">N2</span>
+          <h1 className="mt-4 text-xl font-black tracking-tight text-white">Admin — no access for this account</h1>
+          <p className="mt-3 text-sm leading-relaxed text-steel">{message}</p>
+          <button type="button" onClick={onSignOut} className="btn btn-outline mt-6">
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
   if (!authReady) {
     return (
       <div className="bg-night">
@@ -337,6 +361,17 @@ function AdminPage() {
   }
 
   if (!session) return <AdminAuthGate />;
+  // Owner-only allow-list (see src/lib/adminAccess.ts): a shop account signed in
+  // on /account is a valid Supabase user, and must NOT reach this tooling.
+  const access = adminAccessVerdict(session.user?.email ?? null, readAdminAllowList());
+  if (!access.allowed) {
+    return (
+      <AdminNoAccess
+        onSignOut={signOut}
+        message={access.message ?? "This account doesn't have admin access."}
+      />
+    );
+  }
   return <AdminDashboard onSignOut={signOut} />;
 }
 
