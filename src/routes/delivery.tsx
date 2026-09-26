@@ -8,7 +8,7 @@ import {
   PageCta,
   MailLink,
 } from "~/components/ContentPage";
-import { getPricingSettings } from "~/lib/pricing";
+import { getPricingSettings, wheelShippingPerUnit } from "~/lib/pricing";
 
 export const Route = createFileRoute("/delivery")({
   head: () => ({
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/delivery")({
       {
         name: "description",
         content:
-          "UK-wide delivery for alloy wheels, tyres and accessories — from £35 for a single wheel and £80 for a full set of 4. Delivery times are estimates and confirmed with your order.",
+          "UK-wide delivery for alloy wheels, tyres and accessories — a flat £20 per wheel, so £80 for a full set of 4. Delivery times are estimates and confirmed with your order.",
       },
     ],
   }),
@@ -26,6 +26,13 @@ export const Route = createFileRoute("/delivery")({
 
 function DeliveryPage() {
   const s = getPricingSettings();
+  const perWheel = wheelShippingPerUnit(s);
+  /** The wheel quantities customers actually order, priced from the settings. */
+  const wheelRows = [
+    { label: "1 wheel (spare or replacement)", qty: 1 },
+    { label: "2 wheels (one axle)", qty: 2 },
+    { label: "4 wheels (full set)", qty: 4 },
+  ];
   return (
     <ContentPage
       chip="Delivery"
@@ -33,32 +40,36 @@ function DeliveryPage() {
       intro="We supply wheels, tyres, packages and accessories throughout the UK. Rates below come from our pricing settings — the same numbers the order engine uses."
     >
       <ContentSection
-        title="Wheel delivery — per quantity"
-        lead={`Standard delivery for alloy wheels is charged by quantity of wheels in the order (settings-driven):`}
+        title="Wheel delivery — per wheel"
+        lead={`Standard delivery for alloy wheels is a flat rate per wheel, so it scales with the number of wheels on your order (settings-driven):`}
       >
         <div className="overflow-hidden rounded-xl border border-white/10">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-line bg-coal/60 text-xs font-semibold uppercase tracking-wider text-steel">
                 <th className="px-4 py-3">Order</th>
-                <th className="px-4 py-3">Price</th>
+                <th className="px-4 py-3">Delivery</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line text-steel">
-              {[...s.shippingTiers]
-                .sort((a, b) => b.minQty - a.minQty)
-                .map((tier) => (
-                  <tr key={tier.minQty}>
-                    <td className="px-4 py-3">{tier.label}</td>
-                    <td className="px-4 py-3 font-semibold text-white">£{tier.priceGBP.toFixed(0)}</td>
-                  </tr>
-                ))}
+              {wheelRows.map((row) => (
+                <tr key={row.qty}>
+                  <td className="px-4 py-3">{row.label}</td>
+                  <td className="px-4 py-3 font-semibold text-white">
+                    £{(row.qty * perWheel).toFixed(2)}{" "}
+                    <span className="text-xs font-normal text-steel">
+                      ({row.qty} × £{perWheel.toFixed(2)} per wheel)
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
         <P>
-          A complete wheel &amp; tyre package is a full 4-wheel set, so it ships at the
-          4-wheel rate ({`£${s.shippingTiers[0].priceGBP.toFixed(0)}`}).
+          That is <strong className="text-white">£{perWheel.toFixed(2)} per wheel</strong>, added to the
+          parts total and shown as its own line at checkout. A complete wheel &amp; tyre package is a
+          full 4-wheel set, so it ships at the 4-wheel rate ({`£${(4 * perWheel).toFixed(2)}`}).
         </P>
       </ContentSection>
 

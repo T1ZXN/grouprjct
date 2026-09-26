@@ -73,6 +73,38 @@ export interface PackageTyreSpec {
   rimDiameter: number;
 }
 
+/**
+ * Verbatim attributes of a GBP trade/retail supplier feed row (owner's feeds:
+ * the Wolfrace trade export, and Automotive Wheels UK when it arrives).
+ *
+ * Two jobs:
+ *   1. `priceSource` records WHICH feed column set the site retail price
+ *      (`retailIncVat` / `retailExVat` / `tradePrice` — see
+ *      retailIncVatFromFeedPrices), so a bulk "recalculate prices" can never
+ *      silently overwrite the supplier's own published retail price.
+ *   2. The price columns and stock counts are kept exactly as published, and
+ *      any other feed column we carry (wheelSize, centreBore, loadRating,
+ *      weight, origin, EAN, TÜV, van-speed, winter, fixed price…) rides along
+ *      in `extra` — nothing here is derived or invented; it is the feed's own
+ *      data, shown for reference.
+ */
+export interface FeedAttributes {
+  /** Trade price (£, ex. VAT) exactly as published, when the feed carries it. */
+  tradePriceGbp?: number;
+  /** Retail price ex. VAT (£) exactly as published, when the feed carries it. */
+  retailExVatGbp?: number;
+  /** Retail price inc. VAT (£) exactly as published, when the feed carries it. */
+  retailIncVatGbp?: number;
+  /** Which feed column the site's retail price came from. */
+  priceSource: "retailIncVat" | "retailExVat" | "tradePrice";
+  /** Stock counts as published: UK warehouse, European warehouse, and their total. */
+  ukStock?: number;
+  europeStock?: number;
+  totalStock?: number;
+  /** Other feed columns carried verbatim (strings, as the feed publishes them). */
+  extra?: Record<string, string>;
+}
+
 export interface Wheel {
   id: string;
   /** Supplier catalogue / feed ID (the future import key). */
@@ -99,6 +131,11 @@ export interface Wheel {
    * always surfaced with a "sample fitment data" label; never a guarantee.
    */
   vehicleFitments?: VehicleFitment[];
+  /**
+   * Present ONLY on wheels imported from a GBP trade/retail feed: the feed's own
+   * published prices and specs (see FeedAttributes). Absent on sample wheels.
+   */
+  feedAttributes?: FeedAttributes;
 }
 
 export interface Tyre {

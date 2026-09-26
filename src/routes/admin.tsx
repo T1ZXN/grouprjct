@@ -13,15 +13,18 @@ import {
   setPricingSettings,
   shippingForCategory,
   shippingForQuantity,
+  wheelShippingPerUnit,
 } from "~/lib/pricing";
-import type { PricingSettings, RecalcReport, ShippingTier } from "~/lib/pricing";
+import type { PricingSettings, RecalcReport } from "~/lib/pricing";
 import { supabase } from "~/lib/supabase";
 import {
+  FEED_SHAPES,
   mapFeedRowToProduct,
   parseSupplierExcel,
   parseSupplierFeed,
   renderRowsToCsv,
   SAMPLE_CSV,
+  SAMPLE_WHEEL_TRADE_CSV,
   SAMPLE_XML,
 } from "~/lib/import";
 import type { ParseResult } from "~/lib/import";
@@ -61,8 +64,9 @@ interface Draft {
   eurToGbp: string;
   retailMarginPct: string;
   retailMarginPerSetGBP: string;
+  tradeMarginMultiplier: string;
   vatRatePct: string;
-  tiers: { minQty: number; priceGBP: string }[];
+  shippingPerWheel: string;
   shippingTyres: string;
   shippingAccessories: string;
 }
@@ -78,8 +82,9 @@ function draftFromSettings(s: PricingSettings): Draft {
     eurToGbp: String(s.eurToGbp),
     retailMarginPct: String(s.retailMarginPct),
     retailMarginPerSetGBP: String(s.retailMarginPerSetGBP),
+    tradeMarginMultiplier: String(s.tradeMarginMultiplier),
     vatRatePct: String(round2(s.vatRate * 100)),
-    tiers: s.shippingTiers.map((t) => ({ minQty: t.minQty, priceGBP: String(t.priceGBP) })),
+    shippingPerWheel: String(s.wheelShippingPerUnit),
     shippingTyres: String(s.shippingByCategory.tyres),
     shippingAccessories: String(s.shippingByCategory.accessories),
   };
@@ -91,25 +96,22 @@ function draftToSettings(d: Draft): { settings: PricingSettings | null; error?: 
   const rate = num(d.eurToGbp);
   const marginPct = num(d.retailMarginPct);
   const marginSet = num(d.retailMarginPerSetGBP);
+  const tradeMargin = num(d.tradeMarginMultiplier);
   const vatPct = num(d.vatRatePct);
+  const perWheel = num(d.shippingPerWheel);
   const tyres = num(d.shippingTyres);
   const accessories = num(d.shippingAccessories);
   if (discount === null || discount < 0) return { settings: null, error: "Supplier discount must be a number ≥ 0." };
   if (rate === null || rate <= 0) return { settings: null, error: "EUR→GBP rate must be a positive number." };
   if (marginPct === null || marginPct < 0) return { settings: null, error: "Retail margin % must be a number ≥ 0." };
   if (marginSet === null || marginSet < 0) return { settings: null, error: "Margin per wheel set must be a number ≥ 0." };
+  if (tradeMargin === null || tradeMargin < 0) {
+    return { settings: null, error: "Trade-price margin multiplier must be a number ≥ 0 (1.2 = +20%)." };
+  }
   if (vatPct === null || vatPct < 0) return { settings: null, error: "VAT % must be a number ≥ 0." };
+  if (perWheel === null || perWheel < 0) return { settings: null, error: "Delivery per wheel must be a number ≥ 0." };
   if (tyres === null || tyres < 0) return { settings: null, error: "Tyre shipping must be a number ≥ 0." };
   if (accessories === null || accessories < 0) return { settings: null, error: "Accessory shipping must be a number ≥ 0." };
-  const tierPrices = d.tiers.map((t) => num(t.priceGBP));
-  if (tierPrices.some((n) => n === null || n! < 0)) {
-    return { settings: null, error: "Every shipping tier must be a number ≥ 0." };
-  }
-  const shippingTiers: ShippingTier[] = d.tiers.map((t, i) => ({
-    minQty: t.minQty,
-    priceGBP: tierPrices[i] ?? 0,
-    label: `≥ ${t.minQty} wheel${t.minQty > 1 ? "s" : ""}`,
-  }));
   const base = getPricingSettings();
   return {
     settings: {
@@ -118,9 +120,11 @@ function draftToSettings(d: Draft): { settings: PricingSettings | null; error?: 
       eurToGbp: rate,
       retailMarginPct: marginPct,
       retailMarginPerSetGBP: marginSet,
+      tradeMarginMultiplier: tradeMargin,
       vatRate: vatPct / 100,
-      shippingGBP: shippingTiers[0]?.priceGBP ?? 0,
-      shippingTiers,
+      // A 4-wheel set costs 4 × the per-wheel rate (owner's rule).
+      shippingGBP: round2(4 * perWheel),
+      wheelShippingPerUnit: perWheel,
       shippingByCategory: { tyres, accessories },
     },
   };
@@ -436,11 +440,6 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
   const [importReport, setImportReport] = useState<ImportCatalogueResult | null>(null);
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
-  const setTier = (i: number, patch: Partial<{ minQty: number; priceGBP: string }>) =>
-    setDraft((d) => ({
-      ...d,
-      tiers: d.tiers.map((t, j) => (j === i ? { ...t, ...patch } : t)),
-    }));
 
   /** Keep per-row drafts' price in sync after a bulk recalculation. */
   const applyRecalcToDrafts = (catalogue: MappedProduct[]) => {
@@ -755,24 +754,36 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                     inputMode="decimal"
                   />
                 </label>
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-steel">Trade-price margin × (1.2 = +20%)</span>
+                  <input
+                    className={`${inputCls} mt-1`}
+                    value={draft.tradeMarginMultiplier}
+                    onChange={(e) => set({ tradeMarginMultiplier: e.target.value })}
+                    inputMode="decimal"
+                  />
+                  <span className="mt-1 block text-[11px] leading-relaxed text-steel-dim">
+                    Applied when a supplier feed publishes a TRADE price but no retail column —
+                    retail = trade × {draft.tradeMarginMultiplier || "1.2"} × (1 + VAT).
+                  </span>
+                </label>
               </div>
 
-              <h3 className="mt-7 text-sm font-bold uppercase tracking-wider text-white">Shipping tiers (wheels, per order)</h3>
-              <div className="mt-3 space-y-2">
-                {draft.tiers.map((t, i) => (
-                  <div key={t.minQty} className="flex items-center gap-3">
-                    <span className="w-40 text-xs text-steel">
-                      {t.minQty >= 4 ? "4+ wheels (full set)" : `${t.minQty} wheel${t.minQty > 1 ? "s" : ""}`}
-                    </span>
-                    <span className="text-steel-dim">£</span>
-                    <input
-                      className={`${inputCls} max-w-32`}
-                      value={t.priceGBP}
-                      onChange={(e) => setTier(i, { priceGBP: e.target.value })}
-                      inputMode="decimal"
-                    />
-                  </div>
-                ))}
+              <h3 className="mt-7 text-sm font-bold uppercase tracking-wider text-white">Delivery — wheels</h3>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-steel">Delivery per wheel (£)</span>
+                  <input
+                    className={`${inputCls} mt-1`}
+                    value={draft.shippingPerWheel}
+                    onChange={(e) => set({ shippingPerWheel: e.target.value })}
+                    inputMode="decimal"
+                  />
+                  <span className="mt-1 block text-[11px] leading-relaxed text-steel-dim">
+                    Charged per wheel unit in the basket: 4 wheels ={" "}
+                    {formatGBP(round2(4 * (Number(draft.shippingPerWheel) || 0)))}.
+                  </span>
+                </label>
               </div>
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -817,7 +828,11 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
               {recalc && (
                 <p className="mt-4 text-xs text-steel">
                   Last recalculation: {recalc.count} products scanned — {recalc.changed} price changes
-                  ({recalc.changedIds.length ? recalc.changedIds.slice(0, 8).join(", ") : "none"}…).
+                  ({recalc.changedIds.length ? recalc.changedIds.slice(0, 8).join(", ") : "none"}…)
+                  {recalc.skippedFeedPriced > 0
+                    ? ` · ${recalc.skippedFeedPriced} feed-priced wheel${recalc.skippedFeedPriced === 1 ? "" : "s"} left untouched (supplier's own published retail price)`
+                    : ""}
+                  .
                 </p>
               )}
             </section>
@@ -829,21 +844,31 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                   <div className="flex justify-between gap-3"><dt className="text-steel">Discount</dt><dd className="font-semibold text-white">{draft.supplierDiscountPct}%</dd></div>
                   <div className="flex justify-between gap-3"><dt className="text-steel">EUR → GBP</dt><dd className="font-semibold text-white">{draft.eurToGbp}</dd></div>
                   <div className="flex justify-between gap-3"><dt className="text-steel">Margin / wheel set</dt><dd className="font-semibold text-white">{formatGBP(Number(draft.retailMarginPerSetGBP) || 0)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-steel">Trade-price margin ×</dt><dd className="font-semibold text-white">{draft.tradeMarginMultiplier}×</dd></div>
                   <div className="flex justify-between gap-3"><dt className="text-steel">VAT</dt><dd className="font-semibold text-white">{draft.vatRatePct}%</dd></div>
-                  <div className="flex justify-between gap-3"><dt className="text-steel">Shipping 4 wheels</dt><dd className="font-semibold text-white">{formatGBP(shippingForQuantity(4))}</dd></div>
-                  <div className="flex justify-between gap-3"><dt className="text-steel">Shipping 2 / 1 wheel</dt><dd className="font-semibold text-white">{formatGBP(shippingForQuantity(2))} / {formatGBP(shippingForQuantity(1))}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-steel">Delivery per wheel</dt><dd className="font-semibold text-white">{formatGBP(wheelShippingPerUnit(getPricingSettings()))}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-steel">Delivery 4 / 2 / 1 wheels</dt><dd className="font-semibold text-white">{formatGBP(shippingForQuantity(4))} / {formatGBP(shippingForQuantity(2))} / {formatGBP(shippingForQuantity(1))}</dd></div>
                   <div className="flex justify-between gap-3"><dt className="text-steel">Shipping tyres / accessories</dt><dd className="font-semibold text-white">{formatGBP(shippingForCategory("tyres"))} / {formatGBP(shippingForCategory("accessories"))}</dd></div>
                 </dl>
               </div>
               <div className="rounded-lg border border-line bg-carbon p-6 text-xs leading-relaxed text-steel">
-                <p className="font-bold text-white">How the brief maps</p>
+                <p className="font-bold text-white">How the pricing maps</p>
                 <p className="mt-2">
-                  Supplier price (EUR) → −discount → ×EUR/GBP → +£75 margin per 4-wheel set → +20% VAT.
-                  Tyres/accessories use the per-item margin % instead. Delivery is separate: £80 for a
-                  4-wheel order, lower tiers for 1–2 wheels and accessories. The six DB-backed knobs
-                  (margin %, discount %, EUR→GBP, VAT, 4/2-wheel shipping) are what "Save" writes to
-                  public.pricing_settings; the per-set margin and per-category shipping stay on the
-                  built-in defaults for the session that runs the recalculation.
+                  EUR supplier lists: price (EUR) → −discount → ×EUR/GBP → +£75 margin per 4-wheel
+                  set → +20% VAT; tyres/accessories use the per-item margin % instead.
+                </p>
+                <p className="mt-2">
+                  GBP trade/retail feeds (the Wolfrace export and the Automotive Wheels UK feed):
+                  the supplier&apos;s retailIncVat is the site price; if only retailExVat is published
+                  it is × (1 + VAT); if the feed publishes a trade price only it is × 1.2 margin ×
+                  (1 + VAT). A bulk recalculation never overwrites a feed-published retail price.
+                </p>
+                <p className="mt-2">
+                  Delivery is separate: a flat £ per wheel (4 wheels = 4 × the per-wheel rate),
+                  plus the flat tyre/accessory rates. The DB-backed knobs (margin %, discount %,
+                  EUR→GBP, VAT, per-wheel + tyre/accessory delivery) are what &quot;Save&quot; writes;
+                  the per-set margin and the trade-price multiplier stay on the built-in defaults
+                  for the session that applies them.
                 </p>
               </div>
             </aside>
@@ -1008,6 +1033,9 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                 <button type="button" className="btn-ghost btn px-3 py-2 text-xs" onClick={() => { setImportText(SAMPLE_XML); setImportFileName("sample-feed.xml"); setImportExcelRows(null); }}>
                   Load XML sample
                 </button>
+                <button type="button" className="btn-ghost btn px-3 py-2 text-xs" onClick={() => { setImportText(SAMPLE_WHEEL_TRADE_CSV); setImportFileName("wheel-trade-sample.csv"); setImportExcelRows(null); }}>
+                  Load wheel trade sample (GBP)
+                </button>
               </div>
               <textarea
                 className={`${inputCls} mt-3 h-64 font-mono text-xs leading-relaxed`}
@@ -1061,16 +1089,43 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
               {importResult && (
                 <div className="mt-5 space-y-5">
                   <div className="flex flex-wrap gap-3 text-sm">
+                    <span className="rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 font-semibold text-sky-300">
+                      Feed shape: {FEED_SHAPES[importResult.summary.shape].label}
+                    </span>
                     <span className="rounded-md border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-semibold text-emerald-300">
                       {importResult.summary.imported} imported
                     </span>
                     <span className={`rounded-md border px-3 py-1.5 font-semibold ${importResult.summary.failed ? "border-race/40 bg-race/10 text-race-bright" : "border-line bg-white/5 text-steel"}`}>
                       {importResult.summary.failed} rejected
                     </span>
+                    <span className={`rounded-md border px-3 py-1.5 font-semibold ${importResult.summary.skipped ? "border-amber-300/40 bg-amber-300/10 text-amber-200" : "border-line bg-white/5 text-steel"}`}>
+                      {importResult.summary.skipped} skipped
+                    </span>
                     <span className="rounded-md border border-line bg-white/5 px-3 py-1.5 text-steel">
                       stock sync stub: {importResult.sync.updated} matched · {importResult.sync.changed} statuses would change
                     </span>
                   </div>
+
+                  {importResult.summary.skips.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-amber-200">
+                        Skipped rows (not imported)
+                      </h3>
+                      <ul className="mt-2 space-y-1">
+                        {importResult.summary.skips.slice(0, 12).map((s, i) => (
+                          <li key={i} className="rounded-md border border-amber-300/30 bg-amber-300/5 px-3 py-2 text-xs text-steel">
+                            <span className="font-mono text-amber-200">row {s.row}</span> — {s.message}
+                          </li>
+                        ))}
+                      </ul>
+                      {importResult.summary.skips.length > 12 && (
+                        <p className="mt-1 text-xs text-steel-dim">
+                          …and {importResult.summary.skips.length - 12} more skipped row
+                          {importResult.summary.skips.length - 12 === 1 ? "" : "s"}.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {importResult.summary.errors.length > 0 && (
                     <div>
@@ -1117,11 +1172,16 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                   </div>
                   <p className="text-xs leading-relaxed text-steel-dim">
                     Rows above are mapped to the site’s product model (Wheel / Tyre / Package /
-                    Accessory) with retail prices computed by the pricing engine — a preview of
-                    exactly what “Import to catalogue” would write. Nothing is written until you
-                    press that button. The stock column shows the
+                    Accessory) — a preview of exactly what “Import to catalogue” would write.
+                    Nothing is written until you press that button. EUR supplier-list rows are
+                    priced by the pricing engine; a GBP trade/retail feed keeps the supplier’s own
+                    retail price (retailIncVat as published, else retailExVat × (1 + VAT), else
+                    tradePrice × 1.2 × 1.2). Skipped rows — the supplier file’s own EXAMPLE/template
+                    row and any row with no usable price — are listed above and are never imported.
+                    The stock column shows the
                     <span className="text-steel"> syncStockFromFeed </span>
-                    mapping (in_stock → In Stock, out_of_stock → Out of stock, unknown → Contact us).
+                    mapping (in_stock → In Stock, available_to_order → Available to order,
+                    out_of_stock → Out of stock, unknown → Contact us).
                   </p>
 
                   {importReport && (

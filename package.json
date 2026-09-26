@@ -17,7 +17,8 @@
     "test:checkout": "bun ./scripts/test-checkout.ts",
     "format": "prettier --write .",
     "test:reglookup": "bun ./scripts/test-reglookup.ts",
-    "test:account": "bun ./scripts/test-account.ts"
+    "test:account": "bun ./scripts/test-account.ts",
+    "test:wheel-pricing": "bun ./scripts/test-wheel-pricing.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

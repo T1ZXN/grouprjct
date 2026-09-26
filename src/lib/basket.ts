@@ -18,12 +18,14 @@
  *
  * ── ORDER-LEVEL DELIVERY (settings-driven, never hard-coded) ─────────────────
  * Delivery comes from the same pricing settings as everywhere else on the site:
- *   • wheels / packages -> the quantity tier (shippingForQuantity); a package
- *     counts as its 4 wheels
+ *   • wheels / packages -> the flat settings rate PER WHEEL × the number of
+ *     wheel units in the basket (owner's rule: £20 per wheel, so £80 for a set
+ *     of 4); a package counts as its 4 wheels
  *   • tyres / accessories -> the flat per-category charge, charged once per
  *     order when at least one such line is present
  * Those are the numbers /delivery publishes, so the basket can never quote a
- * delivery figure the rest of the site disagrees with.
+ * delivery figure the rest of the site disagrees with, and the wheel line
+ * spells the calculation out ("4 × £20.00 per wheel").
  *
  * HONESTY: all catalogue data is sample data (labelled in the UI). The basket
  * makes no stock, availability or payment claim — it is a list the customer
@@ -37,6 +39,7 @@ import {
   round2,
   shippingForCategory,
   shippingForQuantity,
+  wheelShippingPerUnit,
 } from "~/lib/pricing";
 import type { PricingSettings } from "~/lib/pricing";
 
@@ -273,8 +276,11 @@ export function shippingLinesForBasket(
     0,
   );
   if (wheelUnits > 0) {
+    const perWheel = wheelShippingPerUnit(settings);
     out.push({
-      label: `Wheels (${wheelUnits} wheel${wheelUnits === 1 ? "" : "s"})`,
+      label:
+        `${wheelUnits} wheel${wheelUnits === 1 ? "" : "s"} × ` +
+        `£${perWheel.toFixed(2)} per wheel`,
       amount: shippingForQuantity(wheelUnits, settings),
     });
   }
