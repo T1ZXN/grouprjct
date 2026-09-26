@@ -19,7 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { demoAllProducts } from "../src/data/products";
 import type { Accessory, Tyre, Wheel, WheelPackage } from "../src/data/products";
-import { DEFAULT_PRICING_SETTINGS } from "../src/lib/pricing";
+import { DEFAULT_PRICING_SETTINGS, round2 } from "../src/lib/pricing";
 
 type AnyProduct = Wheel | Tyre | WheelPackage | Accessory;
 
@@ -105,10 +105,11 @@ function rowSql(p: AnyProduct): string {
 }
 
 const s = DEFAULT_PRICING_SETTINGS;
-const shipping4 =
-  s.shippingTiers.find((t) => t.minQty === 4)?.priceGBP ?? s.shippingGBP;
-const shipping2 =
-  s.shippingTiers.find((t) => t.minQty === 2)?.priceGBP ?? shipping4;
+// Delivery is stored in the table's legacy 4-wheel / 2-wheel columns, derived
+// from the owner's per-wheel rule (£20/wheel → £80 for a set of 4). loadSettings()
+// reads the per-wheel rate straight back out of shipping_4.
+const shipping4 = round2(s.wheelShippingPerUnit * 4);
+const shipping2 = round2(s.wheelShippingPerUnit * 2);
 const rows = demoAllProducts.map(rowSql);
 
 const sql = `-- ============================================================================
@@ -134,8 +135,12 @@ const sql = `-- ================================================================
 --      types expect.
 --   2. public.pricing_settings — ONE row (id=1) mirroring the current defaults
 --      in src/lib/pricing.ts (25% discount, 0.86 EUR->GBP, 55% per-item
---      margin, 20% VAT, £80/£55 shipping; the £75 per wheel-set margin and the
---      1-wheel placeholder tier stay on the site's built-in defaults).
+--      margin, 20% VAT). Delivery is the owner's per-wheel rule (£20 per wheel)
+--      stored in the table's legacy 4-wheel / 2-wheel columns: shipping_4 = 80
+--      and shipping_2 = 40. loading the settings reads £/wheel back out of
+--      shipping_4, so those two columns always describe the same rate. The £75
+--      per wheel-set margin and the trade-price margin multiplier (×1.2) stay
+--      on the site's built-in defaults.
 --   3. RLS (Row Level Security) — ON for both tables:
 --        products:          anon SELECT only (public catalogue) +
 --                           authenticated full CRUD (admin, after sign-in)

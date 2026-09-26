@@ -26,6 +26,7 @@ import type {
   WheelPackage,
   WheelSize,
   Accessory,
+  FeedAttributes,
 } from "~/data/products";
 import { demoAllProducts } from "~/data/products";
 import {
@@ -35,7 +36,7 @@ import {
   recalculateAllPrices,
   round2,
 } from "~/lib/pricing";
-import type { PricingSettings, RecalcReport, ShippingTier } from "~/lib/pricing";
+import type { PricingSettings, RecalcReport } from "~/lib/pricing";
 import { supabase } from "~/lib/supabase";
 
 /** Unified catalogue line — exactly the four sample-product shapes. */
@@ -140,6 +141,37 @@ function fitmentRecords(fitment: unknown): VehicleFitment[] | undefined {
   return records.length > 0 ? records : undefined;
 }
 
+const FEED_PRICE_SOURCES = ["retailIncVat", "retailExVat", "tradePrice"] as const;
+
+/** Parse product.specs.feed jsonb -> the feed's own published prices/specs. */
+function feedAttributes(specs: Record<string, unknown>): FeedAttributes | undefined {
+  const raw = specs.feed;
+  if (!raw || typeof raw !== "object") return undefined;
+  const f = raw as Record<string, unknown>;
+  const source = toStr(f.priceSource);
+  if (!(FEED_PRICE_SOURCES as readonly string[]).includes(source)) return undefined;
+  const numOf = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  const extra =
+    f.extra && typeof f.extra === "object"
+      ? Object.fromEntries(
+          Object.entries(f.extra as Record<string, unknown>)
+            .filter(([, v]) => typeof v === "string" && v.trim() !== "")
+            .map(([k, v]) => [k, String(v)]),
+        )
+      : undefined;
+  return {
+    tradePriceGbp: numOf(f.tradePriceGbp),
+    retailExVatGbp: numOf(f.retailExVatGbp),
+    retailIncVatGbp: numOf(f.retailIncVatGbp),
+    priceSource: source as FeedAttributes["priceSource"],
+    ukStock: numOf(f.ukStock),
+    europeStock: numOf(f.europeStock),
+    totalStock: numOf(f.totalStock),
+    extra: extra && Object.keys(extra).length > 0 ? extra : undefined,
+  };
+}
+
 /**
  * Inverse of the pricing engine (pricing.ts): a stored retail price (inc. VAT)
  * back to a supplier EUR figure, using the CURRENT runtime settings. Products
@@ -203,6 +235,10 @@ export function rowToProduct(row: ProductRow): Product | null {
       includedBolts: toStr(specs.includedBolts),
       vehicleCompatibility: fitmentCompatibility(row.fitment),
       vehicleFitments: fitmentRecords(row.fitment),
+      // Present only on rows imported from a GBP trade/retail feed: the feed's
+      // own prices/specs (and the marker that keeps a bulk recalculation from
+      // overwriting the supplier's published retail price).
+      feedAttributes: feedAttributes(specs),
     };
     return wheel;
   }
@@ -316,11 +352,15 @@ export async function loadProducts(): Promise<Product[]> {
 
 /**
  * Load central pricing settings (row id=1). Returns `null` when unconfigured /
- * unavailable so the app keeps using the built-in brief defaults — the caller
- * decides whether to merge. Non-persisted fields (per-set margin £75, the
- * 1-wheel placeholder shipping tier, per-category tyre/accessory shipping)
- * stay on DEFAULT_PRICING_SETTINGS; the seeded row mirrors those defaults, so
- * the merged result is identical to today's behaviour.
+ * unavailable so the app keeps using the built-in owner-rule defaults — the
+ * caller decides whether to merge.
+ *
+ * The seeded row predates the owner's per-wheel delivery rule, so its two
+ * legacy columns are read as what they actually mean for a wheel order:
+ * `shipping_4` is the price of a 4-wheel set → £ per wheel = shipping_4 / 4
+ * (the owner's £20/wheel). `shipping_2` is accepted as a cross-check only when
+ * shipping_4 is missing. Non-persisted fields (trade margin multiplier, per-set
+ * margin, per-category tyre/accessory shipping) stay on the built-in defaults.
  */
 export async function loadSettings(): Promise<PricingSettings | null> {
   if (!supabase) return null;
@@ -335,19 +375,18 @@ export async function loadSettings(): Promise<PricingSettings | null> {
     const num = (v: number | null | undefined, fallback: number): number =>
       typeof v === "number" && Number.isFinite(v) ? v : fallback;
     const base = cloneSettings(DEFAULT_PRICING_SETTINGS);
-    const twoTier = base.shippingTiers.find((t) => t.minQty === 2)?.priceGBP ?? base.shippingGBP;
-    const shipping4 = num(row.shipping_4, base.shippingGBP);
-    const shippingTiers: ShippingTier[] = base.shippingTiers.map((t) =>
-      t.minQty === 4 ? { ...t, priceGBP: shipping4 } : t.minQty === 2 ? { ...t, priceGBP: num(row.shipping_2, twoTier) } : t,
-    );
+    const shipping4 = num(row.shipping_4, base.wheelShippingPerUnit * 4);
+    const shipping2 = num(row.shipping_2, shipping4 / 2);
+    const perWheel =
+      shipping4 > 0 ? shipping4 / 4 : shipping2 > 0 ? shipping2 / 2 : base.wheelShippingPerUnit;
     const settings: PricingSettings = {
       ...base,
       supplierDiscountPct: num(row.supplier_discount_pct, base.supplierDiscountPct),
       eurToGbp: num(row.eur_gbp, base.eurToGbp),
       retailMarginPct: num(row.margin_pct, base.retailMarginPct),
       vatRate: num(row.vat_pct, base.vatRate * 100) / 100,
+      wheelShippingPerUnit: round2(perWheel),
       shippingGBP: shipping4,
-      shippingTiers,
     };
     return settings;
   } catch {
@@ -377,12 +416,15 @@ function writeError(e: unknown): string {
 }
 
 /**
- * Upsert the six DB-backed pricing knobs into public.pricing_settings (row
- * id=1): per-item margin %, supplier discount %, EUR→GBP, VAT % (whole
- * percent), shipping for 4+ and 2 wheels. The £75-per-set margin and
- * per-category tyre/accessory shipping have NO columns in the current schema —
- * they stay on the built-in defaults and apply for the session that runs the
- * recalculation (their effect persists via the product prices they produce).
+ * Upsert the DB-backed pricing knobs into public.pricing_settings (row id=1):
+ * per-item margin %, supplier discount %, EUR→GBP, VAT % (whole percent), and
+ * delivery for wheels / tyres / accessories. The owner's delivery rule is a
+ * flat £ PER WHEEL; the table's legacy columns store a 4-wheel and a 2-wheel
+ * order figure, so Save writes per-wheel × 4 into `shipping_4` and per-wheel × 2
+ * into `shipping_2` — the two columns stay consistent with the per-wheel rate
+ * and loadSettings() reads the rate straight back out of `shipping_4`.
+ * The trade-price margin multiplier has NO column in the current schema — it
+ * stays on the built-in default (×1.2) for the session that applies it.
  */
 export async function savePricingSettings(
   settings: PricingSettings,
@@ -390,10 +432,9 @@ export async function savePricingSettings(
   if (!supabase) return { ok: false, error: "Supabase is not configured on this build." };
   const client = supabase;
   try {
-    const shipping4 =
-      settings.shippingTiers.find((t) => t.minQty === 4)?.priceGBP ?? settings.shippingGBP;
-    const shipping2 =
-      settings.shippingTiers.find((t) => t.minQty === 2)?.priceGBP ?? shipping4;
+    const perWheel = settings.wheelShippingPerUnit;
+    const shipping4 = round2(perWheel * 4);
+    const shipping2 = round2(perWheel * 2);
     const { error } = await client
       .from("pricing_settings")
       .update({

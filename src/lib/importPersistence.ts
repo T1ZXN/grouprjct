@@ -184,6 +184,11 @@ export function productToRow(
       colour: w.colour,
       finish: w.finish,
       includedBolts: w.includedBolts || undefined,
+      // GBP trade/retail feed rows carry the supplier's own published prices,
+      // stock counts and spec columns (see FeedAttributes). Stored verbatim so
+      // the price can be read back — and so the bulk price recalculation can
+      // leave a supplier-published retail price alone.
+      ...(w.feedAttributes ? { feed: w.feedAttributes } : {}),
     };
     fitment = { compatibility: w.vehicleCompatibility ?? [], fitments: w.vehicleFitments ?? [] };
   } else if (p.category === "tyres") {

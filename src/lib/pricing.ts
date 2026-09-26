@@ -1,82 +1,80 @@
 /**
  * Central pricing settings engine for N2 Wheels.
  *
- * RETAIL PRICES ARE NEVER HARD-CODED PER PRODUCT. Each product in the sample
- * catalogue stores only its SUPPLIER price (EUR, matching the supplier-feed
- * price column); every retail price the site displays is derived from the
- * settings in this module.
+ * RETAIL PRICES ARE NEVER HARD-CODED PER PRODUCT. Every price the site shows is
+ * derived here from the central settings.
  *
- * Business-brief pricing model (per the plan):
- *   supplier list price (EUR)
- *     - supplier discount %              (~25% off list)
- *     * EUR→GBP exchange rate            (~0.86)
- *     + retail margin per wheel SET      (+£75 per SET of 4 wheels — the brief)
- *     + UK VAT (20%)
- *     = retail price inc. VAT (what the site displays)
+ * ── TWO FEED FAMILIES, TWO PRICE RULES ───────────────────────────────────────
+ * 1. TRADE/RETAIL-GBP feeds (the owner's Wolfrace trade export, and the
+ *    Automotive Wheels UK feed when it arrives). These publish prices in £ and
+ *    get the OWNER'S RULE (see retailIncVatFromFeedPrices):
+ *      • `retailIncVat` present                        -> use it as the site price
+ *      • else `retailExVat` present                    -> × (1 + vatRate)        [£×1.20]
+ *      • else only `tradePrice` (no retail columns)    -> × tradeMarginMultiplier
+ *                                                         × (1 + vatRate)        [£×1.44]
+ *    The margin multiplier (1.2) and the VAT rate (0.2) are settings, so the
+ *    fallback is tunable, never hard-coded per row.
+ * 2. EUR supplier-list feeds (the Forzza-shaped demo feed). These keep the
+ *    original engine: supplier list price (EUR) − supplier discount % × EUR→GBP
+ *    + margin, + UK VAT — per-item percentage margin for single items, flat
+ *    per-SET margin for wheels/packages (see priceForProduct).
  *
- * Single items (tyres, accessories) keep the legacy per-item percentage
- * margin (retailMarginPct) — the flat "per wheel set" margin only applies to
- * wheel sets and complete packages.
- *
- * Delivery is settings-driven too and exposed as DATA, not page copy:
- *   shippingForQuantity(qty)  -> £80 for a 4-wheel order (brief), with 1-2
- *                                wheel placeholder tiers below it
- *   shippingForCategory(...)  -> lower flat rates for tyres / accessories
+ * ── DELIVERY (owner rule) ────────────────────────────────────────────────────
+ * Wheels ship at a flat £ PER WHEEL (`wheelShippingPerUnit`, default £20), so a
+ * full set of 4 is £80 — exactly the owner's rule. Tyres and accessories keep
+ * their flat per-order rates. Every figure is exposed as DATA from this module;
+ * the basket/checkout pages read it and never hard-code a delivery charge.
  *
  * The settings live in a mutable in-memory store (the server-side "backend"
- * model): getPricingSettings()/setPricingSettings() change them at runtime
- * and recalculateAllPrices() re-derives every retail price in the catalogue.
- * NOTE for the milestone: nothing here does network or storage I/O. Persisting
- * settings (database) is a future step — the functional surface below is
- * where that persistence layer will plug in.
+ * model): getPricingSettings()/setPricingSettings() change them at runtime and
+ * recalculateAllPrices() re-derives every engine-priced catalogue retail price.
+ * NOTE: nothing here does network or storage I/O. Persisting settings is the
+ * store layer's job (src/lib/store.ts) — the functional surface below is where
+ * that persistence plugs in.
  */
-export interface ShippingTier {
-  /** Minimum number of wheels the tier applies to. */
-  minQty: number;
-  priceGBP: number;
-  label: string;
-}
 
 export interface PricingSettings {
-  /** % discount negotiated off the supplier's list price. */
+  /** % discount negotiated off the supplier's EUR list price. */
   supplierDiscountPct: number;
   /** Exchange rate used to convert supplier (EUR) prices to GBP. */
   eurToGbp: number;
   /** Legacy per-item margin % — applied to tyres/accessories (single items). */
   retailMarginPct: number;
-  /** Brief's model: flat £ margin added per wheel SET (4 wheels). */
+  /** Flat £ margin added per wheel SET (4 wheels) in the EUR-list model. */
   retailMarginPerSetGBP: number;
-  /** UK VAT rate (0.2 = 20%). */
+  /**
+   * Markup applied to a supplier TRADE price to reach retail ex. VAT
+   * (owner's rule: 1.2 = +20% on trade). Used by the trade-only fallback, so a
+   * feed that publishes trade prices without VAT prices lands on trade × 1.2 × 1.2.
+   */
+  tradeMarginMultiplier: number;
+  /** UK VAT rate (0.2 = 20%) — also the ×1.2 step of the feed fallbacks. */
   vatRate: number;
-  /** Legacy standard-delivery figure kept for copy; tiers below are the engine. */
+  /** Flat per-order fallback used only when a category has no configured rate. */
   shippingGBP: number;
-  /** Quantity-tied wheel-shipping tiers (highest minQty first). */
-  shippingTiers: ShippingTier[];
+  /** Delivery £ per WHEEL unit (owner rule: £20 per wheel → £80 for 4 wheels). */
+  wheelShippingPerUnit: number;
   /** Flat per-order shipping for non-wheel categories. */
   shippingByCategory: Record<"tyres" | "accessories", number>;
 }
 
-/** Defaults seeded to match the business brief (~25% off, 0.86 rate, £75/set, £80/4-wheel, 20% VAT). */
+/** Defaults seeded from the owner's rules (trade ×1.2 margin, 20% VAT, £20/wheel). */
 export const DEFAULT_PRICING_SETTINGS: PricingSettings = {
   supplierDiscountPct: 25,
   eurToGbp: 0.86,
   retailMarginPct: 55,
   retailMarginPerSetGBP: 75,
+  tradeMarginMultiplier: 1.2,
   vatRate: 0.2,
   shippingGBP: 80,
-  shippingTiers: [
-    { minQty: 4, priceGBP: 80, label: "4+ wheels (full set)" },
-    { minQty: 2, priceGBP: 55, label: "2 wheels" },
-    { minQty: 1, priceGBP: 35, label: "1 wheel" },
-  ],
+  wheelShippingPerUnit: 20,
   shippingByCategory: { tyres: 14, accessories: 6 },
 };
 
-/** Deep-clone a settings object (arrays/records are copied, never shared). */
+/** Deep-clone a settings object (records are copied, never shared). */
 export function cloneSettings(s: PricingSettings): PricingSettings {
   return {
     ...s,
-    shippingTiers: s.shippingTiers.map((t) => ({ ...t })),
     shippingByCategory: { ...s.shippingByCategory },
   };
 }
@@ -94,10 +92,7 @@ export function setPricingSettings(next: Partial<PricingSettings>): PricingSetti
   pricingSettings = {
     ...pricingSettings,
     ...next,
-    // Deep-replace collection fields when provided so callers can't share refs.
-    shippingTiers: next.shippingTiers
-      ? next.shippingTiers.map((t) => ({ ...t }))
-      : pricingSettings.shippingTiers,
+    // Deep-replace the collection field when provided so callers can't share refs.
     shippingByCategory: next.shippingByCategory
       ? { ...next.shippingByCategory }
       : pricingSettings.shippingByCategory,
@@ -105,13 +100,13 @@ export function setPricingSettings(next: Partial<PricingSettings>): PricingSetti
   return pricingSettings;
 }
 
-/** Restore the brief-seeded defaults (admin "reset" button / tests). */
+/** Restore the owner-rule defaults (admin "reset" button / tests). */
 export function resetPricingSettings(): PricingSettings {
   pricingSettings = cloneSettings(DEFAULT_PRICING_SETTINGS);
   return pricingSettings;
 }
 
-/* ── Price pipeline ───────────────────────────────────────────────────────── */
+/* ── Price pipeline: EUR supplier list ───────────────────────────────────── */
 
 /**
  * Supplier price in EUR -> retail price EXCLUDING VAT (GBP), per single item,
@@ -140,7 +135,7 @@ export function retailPriceIncVat(
 }
 
 /**
- * The brief's wheel-SET model: supplier price per wheel -> total retail price
+ * The EUR-list wheel-SET model: supplier price per wheel -> total retail price
  * INCLUDING VAT for a complete set, applying the flat per-set margin:
  *   (qty × discounted EUR→GBP cost) + retailMarginPerSetGBP, then + VAT.
  * Defaults to a 4-wheel set; a per-wheel share is total / qty.
@@ -168,15 +163,90 @@ export function formatGBP(amount: number): string {
   })}`;
 }
 
+/* ── Price pipeline: GBP trade/retail feeds (the owner's rule) ────────────── */
+
+/** The GBP price columns a trade/retail feed may publish for a row. */
+export interface FeedPriceFields {
+  /** Supplier's recommended retail price INC. VAT (the owner's rule: use as-is). */
+  retailIncVatGbp?: number;
+  /** Supplier's retail price EX. VAT (× (1 + vatRate) → inc. VAT). */
+  retailExVatGbp?: number;
+  /** Supplier's trade price (£, ex. VAT) — × tradeMarginMultiplier × (1 + vatRate). */
+  tradePriceGbp?: number;
+}
+
+/** Which feed column the retail price came from (reported, never guessed). */
+export type FeedPriceSource = "retailIncVat" | "retailExVat" | "tradePrice" | "none";
+
+function positive(v: number | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/**
+ * THE OWNER'S RULE for a GBP trade/retail feed row — settings-driven, in strict
+ * order of preference:
+ *   1. `retailIncVat` present  -> the supplier's own recommended retail price
+ *      (inc. VAT) is the site price, used EXACTLY as published.
+ *   2. else `retailExVat`      -> × (1 + vatRate)  [£135 → £162 at 20% VAT].
+ *   3. else only `tradePrice`  -> × tradeMarginMultiplier × (1 + vatRate)
+ *      [£112.50 → £162, i.e. trade × 1.2 × 1.2].
+ * A row with none of the three has NO usable price: the source is "none" and
+ * the price is 0 — the importer skips such a row rather than inventing a price.
+ */
+export function retailIncVatFromFeedPrices(
+  feed: FeedPriceFields,
+  settings: PricingSettings = pricingSettings,
+): { priceIncVat: number; source: FeedPriceSource } {
+  const incVat = positive(feed.retailIncVatGbp);
+  if (incVat !== null) return { priceIncVat: round2(incVat), source: "retailIncVat" };
+  const exVat = positive(feed.retailExVatGbp);
+  if (exVat !== null) {
+    return { priceIncVat: round2(exVat * (1 + settings.vatRate)), source: "retailExVat" };
+  }
+  const trade = positive(feed.tradePriceGbp);
+  if (trade !== null) {
+    return {
+      priceIncVat: round2(trade * settings.tradeMarginMultiplier * (1 + settings.vatRate)),
+      source: "tradePrice",
+    };
+  }
+  return { priceIncVat: 0, source: "none" };
+}
+
+/**
+ * A GBP feed price expressed in EUR at the current settings rate. GBP feeds
+ * carry no EUR list price, but the catalogue model (and the bulk recalculation
+ * that reads `supplierPriceEur`) needs a supplier figure, so the feed's trade
+ * price is converted with the SAME settings rate the engine uses. Returns 0
+ * when there is no trade price or no usable rate — never a guessed number.
+ */
+export function gbpToEur(amountGbp: number, settings: PricingSettings = pricingSettings): number {
+  if (!Number.isFinite(amountGbp) || amountGbp <= 0) return 0;
+  if (!Number.isFinite(settings.eurToGbp) || settings.eurToGbp <= 0) return 0;
+  return round2(amountGbp / settings.eurToGbp);
+}
+
 /* ── Shipping (settings-driven, exposed as data) ──────────────────────────── */
 
-/** Shipping for a wheel-quantity order: 4 wheels = £80 (brief), 2 = £55, 1 = £35. */
+/**
+ * The settings' flat delivery rate PER WHEEL in £ (0 when not configured).
+ * Exposed so /delivery, the admin panel and the basket all quote the SAME
+ * per-wheel figure the wheel-shipping line is built from.
+ */
+export function wheelShippingPerUnit(settings: PricingSettings = pricingSettings): number {
+  const perUnit = settings.wheelShippingPerUnit;
+  return Number.isFinite(perUnit) && perUnit > 0 ? perUnit : 0;
+}
+
+/**
+ * Delivery for a wheel order: the flat settings rate PER WHEEL × the number of
+ * wheel units (owner's rule — £20/wheel, so £80 for a set of 4, £40 for 2).
+ * A package counts as its 4 wheels (see shippingForOrder / basket.ts).
+ */
 export function shippingForQuantity(qty: number, settings: PricingSettings = pricingSettings): number {
   if (!Number.isFinite(qty) || qty <= 0) return 0;
-  for (const tier of settings.shippingTiers) {
-    if (qty >= tier.minQty) return tier.priceGBP;
-  }
-  return settings.shippingGBP;
+  const perUnit = wheelShippingPerUnit(settings);
+  return perUnit > 0 ? round2(Math.floor(qty) * perUnit) : settings.shippingGBP;
 }
 
 /** Flat per-order shipping for a non-wheel category (tyres / accessories). */
@@ -187,14 +257,14 @@ export function shippingForCategory(
   return settings.shippingByCategory[category] ?? settings.shippingGBP;
 }
 
-/** Order-level shipping for any catalogue line: wheels by qty, others by category. */
+/** Order-level shipping for any catalogue line: wheels by unit, others by category. */
 export function shippingForOrder(
   category: "wheels" | "tyres" | "packages" | "accessories",
   qty: number,
   settings: PricingSettings = pricingSettings,
 ): number {
   if (category === "wheels") return shippingForQuantity(qty, settings);
-  if (category === "packages") return shippingForQuantity(4, settings); // a package IS a 4-wheel set
+  if (category === "packages") return shippingForQuantity(4 * Math.max(1, Math.floor(qty)), settings); // a package IS a 4-wheel set
   return shippingForCategory(category, settings);
 }
 
@@ -215,6 +285,10 @@ export interface PriceableProduct {
  * whole-set model (the package IS the set); tyres/accessories -> per-item
  * percentage model. This is the single source of truth used by recalc and by
  * every "computed" price in the admin UI.
+ *
+ * NOTE: this is the EUR-list model only. Rows imported from a GBP trade/retail
+ * feed keep the price the feed published (retailIncVatFromFeedPrices) — that is
+ * the owner's rule and it is deliberately NOT re-derived here.
  */
 export function priceForProduct(p: PriceableProduct, settings: PricingSettings = pricingSettings): number {
   if (p.category === "wheels") return retailPricePerSetIncVat(p.supplierPriceEur, 4, settings) / 4;
@@ -226,17 +300,34 @@ export interface RecalcReport {
   count: number;
   changed: number;
   changedIds: string[];
+  /** Lines left untouched because they carry a supplier's own GBP retail price. */
+  skippedFeedPriced: number;
+}
+
+/** Any catalogue line that carries verbatim GBP feed pricing (see FeedAttributes). */
+interface FeedPricedProduct {
+  feedAttributes?: { priceSource?: string };
 }
 
 /**
  * Recompute retailPriceIncVat for every catalogue product from the CURRENT
  * settings (mutates the passed products in place — that is the "bulk price
  * update" the admin performs). Returns how many products actually changed.
+ *
+ * Products carrying GBP feed prices (`feedPrices`) are SKIPPED: their price is
+ * the supplier's published retail figure per the owner's rule, so a bulk
+ * recalculation must not silently overwrite it.
  */
 export function recalculateAllPrices(products: PriceableProduct[]): RecalcReport {
   const changedIds: string[] = [];
   let changed = 0;
+  let skippedFeedPriced = 0;
   for (const p of products) {
+    const feedPriced = (p as FeedPricedProduct).feedAttributes?.priceSource;
+    if (feedPriced) {
+      skippedFeedPriced += 1;
+      continue;
+    }
     const next = round2(priceForProduct(p));
     if (p.retailPriceIncVat !== next) {
       changed += 1;
@@ -244,5 +335,5 @@ export function recalculateAllPrices(products: PriceableProduct[]): RecalcReport
     }
     p.retailPriceIncVat = next;
   }
-  return { count: products.length, changed, changedIds };
+  return { count: products.length, changed, changedIds, skippedFeedPriced };
 }

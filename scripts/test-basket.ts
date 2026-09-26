@@ -158,8 +158,8 @@ check(
   money(t4.subtotalIncVat),
 );
 check(
-  "4 wheels: delivery uses the settings 4+ tier (£80)",
-  t4.shipping === 80,
+  "4 wheels: delivery = 4 × the settings per-wheel rate (£20 → £80)",
+  t4.shipping === 80 && settings.wheelShippingPerUnit === 20,
   money(t4.shipping),
 );
 check(
@@ -177,12 +177,17 @@ check(
   round2(t4.vatIncluded + t4.subtotalIncVat / 1.2) === t4.subtotalIncVat,
 );
 check(
-  "1 wheel uses the single-wheel tier (£35)",
-  basketTotals(addToBasket([], wheel, 1), settings).shipping === 35,
+  "1 wheel is charged one per-wheel rate (£20)",
+  basketTotals(addToBasket([], wheel, 1), settings).shipping === 20,
 );
 check(
-  "2 wheels use the 2-wheel tier (£55)",
-  basketTotals(addToBasket([], wheel, 2), settings).shipping === 55,
+  "2 wheels are charged two per-wheel rates (£40)",
+  basketTotals(addToBasket([], wheel, 2), settings).shipping === 40,
+);
+check(
+  "the wheel delivery row spells out the per-wheel calculation",
+  shippingLinesForBasket(fourWheels, settings)[0]?.label === "4 wheels × £20.00 per wheel",
+  shippingLinesForBasket(fourWheels, settings)[0]?.label,
 );
 check(
   "itemCount / lineCount describe the basket",
@@ -190,8 +195,8 @@ check(
 );
 const mixedTotals = basketTotals(mixed, settings);
 check(
-  "mixed basket: wheel tier + flat tyre + accessory delivery (35 + 14 + 6)",
-  mixedTotals.shipping === 35 + 14 + 6,
+  "mixed basket: one wheel rate + flat tyre + accessory delivery (20 + 14 + 6)",
+  mixedTotals.shipping === 20 + 14 + 6,
   money(mixedTotals.shipping),
 );
 check(
@@ -217,8 +222,9 @@ check(
   money(onePackage.shipping),
 );
 check(
-  "two packages stay on the 4+ wheel tier (not £80 twice)",
-  basketTotals(addToBasket([], pkg, 2), settings).shipping === 80,
+  "two packages ship as their 8 wheels (8 × £20 = £160)",
+  basketTotals(addToBasket([], pkg, 2), settings).shipping === 160,
+  money(basketTotals(addToBasket([], pkg, 2), settings).shipping),
 );
 const emptyTotals = basketTotals([], settings);
 check(
@@ -234,13 +240,13 @@ check(
 );
 const customised = basketTotals(fourWheels, {
   ...settings,
-  shippingTiers: [{ minQty: 4, priceGBP: 12.5, label: "test tier" }],
+  wheelShippingPerUnit: 12.5,
   shippingByCategory: { tyres: 3, accessories: 1 },
   vatRate: 0.05,
 });
 check(
   "totals follow the pricing settings rather than hard-coded numbers",
-  customised.shipping === 12.5 &&
+  customised.shipping === 4 * 12.5 &&
     customised.vatIncluded ===
       round2(customised.subtotalIncVat - customised.subtotalIncVat / 1.05),
   `${money(customised.shipping)} / ${money(customised.vatIncluded)}`,
