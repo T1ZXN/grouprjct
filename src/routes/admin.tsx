@@ -622,7 +622,9 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
         ok: res.ok,
         text: res.error
           ? `Import finished: ${res.created} created, ${res.updated} updated, ${res.failed} failed, ${res.skipped} skipped. ${res.error}`
-          : `Import finished: ${res.created} created, ${res.updated} updated, ${res.skipped} skipped.`,
+          : `Import finished: ${res.created} created, ${res.updated} updated, ${res.skipped} skipped — stock written from the feed on ${res.stockWritten} row${res.stockWritten === 1 ? "" : "s"}${
+              res.stockUntouched > 0 ? `, ${res.stockUntouched} left untouched (no stock column in the feed)` : ""
+            }.`,
       });
     }
   };
@@ -1163,6 +1165,19 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                               <span className={`inline-flex items-center rounded-full border border-white/10 px-2 py-0.5 text-[11px] font-semibold ${chipFor(p.stockStatus)}`}>
                                 {p.stockStatus}
                               </span>
+                              {p.feedStock?.quantity !== undefined && (
+                                <span className="ml-2 font-mono text-[11px] font-semibold text-white">
+                                  qty {p.feedStock.quantity}
+                                </span>
+                              )}
+                              {p.feedStock?.fromFeed === false && (
+                                <span
+                                  className="ml-2 text-[11px] text-steel-dim"
+                                  title="This feed has no stock column for the row, so the catalogue's own stock status is left untouched — never zeroed or guessed."
+                                >
+                                  stock not in feed — left as is
+                                </span>
+                              )}
                             </td>
                             <td className="py-2.5 text-right font-semibold text-white">{formatGBP(p.retailPriceIncVat)}</td>
                           </tr>
@@ -1178,10 +1193,15 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                     retail price (retailIncVat as published, else retailExVat × (1 + VAT), else
                     tradePrice × 1.2 × 1.2). Skipped rows — the supplier file’s own EXAMPLE/template
                     row and any row with no usable price — are listed above and are never imported.
-                    The stock column shows the
-                    <span className="text-steel"> syncStockFromFeed </span>
-                    mapping (in_stock → In Stock, available_to_order → Available to order,
-                    out_of_stock → Out of stock, unknown → Contact us).
+                    <span className="text-steel"> Stock: </span>
+                    the sellable quantity is read from whatever your feed publishes — a quantity
+                    column named stock, qty, quantity, stock qty, amount, balance, “on hand”,
+                    “quantity available”, “stock level”, “total stock”… (case-insensitive; blank or
+                    non-numeric cells are ignored, never guessed) or a number sitting in a
+                    status-named column — and it is written into the catalogue row with the status
+                    it implies (qty &gt; 0 → In Stock, qty 0 → Out of stock). A feed with
+                    <em> no</em> stock column leaves the catalogue’s existing stock status exactly
+                    as it is rather than zeroing it.
                   </p>
 
                   {importReport && (
@@ -1202,6 +1222,19 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                         <span className={`rounded-md border px-3 py-1.5 font-semibold ${importReport.skipped ? "border-amber-300/40 bg-amber-300/10 text-amber-200" : "border-line bg-white/5 text-steel"}`}>
                           {importReport.skipped} skipped
                         </span>
+                        <span className={`rounded-md border px-3 py-1.5 font-semibold ${importReport.stockWritten ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-line bg-white/5 text-steel"}`}>
+                          {importReport.stockWritten} row{importReport.stockWritten === 1 ? "" : "s"} updated with feed stock
+                        </span>
+                        {importReport.stockUntouched > 0 && (
+                          <span className="rounded-md border border-line bg-white/5 px-3 py-1.5 text-steel">
+                            {importReport.stockUntouched} with no stock in the feed — stock left as it was
+                          </span>
+                        )}
+                        {importReport.stockSkipped > 0 && (
+                          <span className="rounded-md border border-amber-300/40 bg-amber-300/10 px-3 py-1.5 font-semibold text-amber-200">
+                            {importReport.stockSkipped} new row{importReport.stockSkipped === 1 ? "" : "s"} skipped (no stock in feed)
+                          </span>
+                        )}
                       </div>
                       {importReport.error && (
                         <p className="mt-3 rounded-md border border-race/40 bg-race/10 px-3 py-2 text-xs leading-relaxed text-race-bright">
@@ -1213,6 +1246,12 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
                           Catalogue updated — {importReport.created} new row
                           {importReport.created === 1 ? "" : "s"} inserted, {importReport.updated} existing
                           row{importReport.updated === 1 ? "" : "s"} updated (upserted on id / slug).
+                          {importReport.stockWritten > 0
+                            ? ` Stock written from the feed on ${importReport.stockWritten} row${importReport.stockWritten === 1 ? "" : "s"} (status + quantity, kept in specs.stock).`
+                            : " This feed carried no stock figure, so no row's stock was changed."}
+                          {importReport.stockSkipped > 0
+                            ? ` ${importReport.stockSkipped} new row${importReport.stockSkipped === 1 ? "" : "s"} skipped — no stock figure to record for a brand-new product (see the skipped list).`
+                            : ""}
                         </p>
                       )}
                       {importReport.failures.length > 0 && (

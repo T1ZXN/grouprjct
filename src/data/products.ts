@@ -105,6 +105,31 @@ export interface FeedAttributes {
   extra?: Record<string, string>;
 }
 
+/**
+ * What a supplier feed said about ONE product's stock (owner rule: "stock" in a
+ * supply feed means the SELLABLE QUANTITY of that tyre/wheel fitment).
+ *
+ * Present only on products mapped from a supplier feed. The distinction that
+ * matters on an upsert:
+ *   • `fromFeed: true`  — the feed published a stock figure for this row, so
+ *     the catalogue's stock_status is written from it.
+ *   • `fromFeed: false` — the feed has NO stock column (or the cell was empty).
+ *     The importer then LEAVES the catalogue's stock alone: it never zeroes or
+ *     guesses a stock status as a side effect of a price-only re-import.
+ */
+export interface FeedStock {
+  /** True when the feed actually carried a stock figure for this row. */
+  fromFeed: boolean;
+  /**
+   * Sellable quantity exactly as the feed published it (the count the feed's own
+   * stock code refers to). Absent when the feed published no usable number —
+   * never defaulted to 0.
+   */
+  quantity?: number;
+  /** The feed's own stock code, e.g. "in_stock" / "available_to_order". */
+  statusCode?: string;
+}
+
 export interface Wheel {
   id: string;
   /** Supplier catalogue / feed ID (the future import key). */
@@ -136,6 +161,8 @@ export interface Wheel {
    * published prices and specs (see FeedAttributes). Absent on sample wheels.
    */
   feedAttributes?: FeedAttributes;
+  /** Present only on feed-imported rows: the feed's own stock figure (see FeedStock). */
+  feedStock?: FeedStock;
 }
 
 export interface Tyre {
@@ -167,6 +194,8 @@ export interface Tyre {
    * confirming an order.
    */
   vehicleFitments?: VehicleFitment[];
+  /** Present only on feed-imported rows: the feed's own stock figure (see FeedStock). */
+  feedStock?: FeedStock;
 }
 
 export interface WheelPackage {
@@ -194,6 +223,8 @@ export interface WheelPackage {
   stockStatus: StockStatus;
   image: string;
   description: string;
+  /** Present only on feed-imported rows: the feed's own stock figure (see FeedStock). */
+  feedStock?: FeedStock;
 }
 
 export interface Category {
@@ -215,6 +246,8 @@ export interface Accessory {
   stockStatus: StockStatus;
   image: string;
   description: string;
+  /** Present only on feed-imported rows: the feed's own stock figure (see FeedStock). */
+  feedStock?: FeedStock;
 }
 
 const retail = (supplierEur: number): number => round2(retailPriceIncVat(supplierEur));

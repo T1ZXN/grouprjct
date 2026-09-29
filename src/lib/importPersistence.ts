@@ -28,7 +28,7 @@
  * the failure can be attributed to the exact row; that fallback is error-path
  * only and is documented below.
  */
-import type { Accessory, Tyre, Wheel, WheelPackage } from "~/data/products";
+import type { Accessory, FeedStock, Tyre, Wheel, WheelPackage } from "~/data/products";
 import { round2 } from "~/lib/pricing";
 import { supabase } from "~/lib/supabase";
 import type { Product, ProductRow } from "~/lib/store";
@@ -51,6 +51,24 @@ export interface ImportCatalogueResult {
   updated: number;
   failed: number;
   skipped: number;
+  /**
+   * Of the rows written, how many carried the FEED'S OWN stock figure (so the
+   * catalogue's stock_status was set from it). Reported per run so the admin can
+   * see that stock really landed — not just that rows were written.
+   */
+  stockWritten: number;
+  /**
+   * Of the rows written, how many left stock untouched: the feed published no
+   * stock column for them, so the payload omits stock_status and the catalogue
+   * keeps the value it already had (never zeroed as a side effect).
+   */
+  stockUntouched: number;
+  /**
+   * NEW products skipped because the feed published no stock figure for them: a
+   * brand-new row cannot be inserted without inventing an availability, and we
+   * never invent one. (A product whose id already exists is still updated.)
+   */
+  stockSkipped: number;
   failures: ImportOutcomeItem[];
   skips: ImportOutcomeItem[];
 }
@@ -69,8 +87,30 @@ export const CATALOGUE_NOT_READY_MSG =
 export const NOTHING_MAPPED_MSG =
   "Nothing was written — none of the rows could be mapped to a catalogue row (see the skipped list).";
 
+export const NOTHING_WRITTEN_MSG =
+  "Nothing was written — every row was skipped (see the skipped list for the reason on each row).";
+
+/**
+ * Why a NEW product is skipped when the feed publishes no stock for it: we will
+ * not invent an availability for a product that has none on record.
+ */
+export const NO_STOCK_NEW_ROW_MSG =
+  "the feed published no stock figure for this product and it does not exist in the catalogue yet, so it was skipped rather than given an invented availability. Add a stock/quantity column to the feed (or create the row first) to import it.";
+
 function blocked(msg: string): ImportCatalogueResult {
-  return { ok: false, error: msg, created: 0, updated: 0, failed: 0, skipped: 0, failures: [], skips: [] };
+  return {
+    ok: false,
+    error: msg,
+    created: 0,
+    updated: 0,
+    failed: 0,
+    skipped: 0,
+    stockWritten: 0,
+    stockUntouched: 0,
+    stockSkipped: 0,
+    failures: [],
+    skips: [],
+  };
 }
 
 /**
@@ -133,7 +173,40 @@ export async function assertCatalogueReady(): Promise<{ ok: true } | { ok: false
  * everything import writes, minus the timestamps the import adds itself.
  * Kept as a separate type so tests can pin the schema contract.
  */
-export type ProductRowDraft = Omit<ProductRow, "created_at" | "updated_at">;
+export type ProductRowDraft = Omit<ProductRow, "created_at" | "updated_at" | "stock_status"> & {
+  /**
+   * In Stock | Available to order | Out of stock | Contact us.
+   * ABSENT when the feed published no stock figure for the row: omitting the
+   * column on upsert leaves the catalogue's existing stock_status exactly as it
+   * was — never zeroed or guessed as a side effect of a price-only re-import.
+   */
+  stock_status?: string;
+};
+
+/**
+ * The row's stock as the FEED published it, for the product's `specs.stock`
+ * jsonb (read back by store.rowToProduct). Returns null when the feed gave no
+ * stock figure at all — then nothing is written about stock.
+ */
+export function feedStockSpec(
+  stock: FeedStock | undefined,
+): { quantity?: number; statusCode?: string } | null {
+  if (!stock || stock.fromFeed === false) return null;
+  if (stock.quantity === undefined && !stock.statusCode) return null;
+  return {
+    ...(stock.quantity !== undefined ? { quantity: stock.quantity } : {}),
+    ...(stock.statusCode ? { statusCode: stock.statusCode } : {}),
+  };
+}
+
+/**
+ * True when this mapped product's payload carries the feed's own stock figure.
+ * False means productToRow will OMIT stock_status (leave the DB value alone).
+ */
+export function productWritesStock(p: Product): boolean {
+  const stock = (p as { feedStock?: FeedStock }).feedStock;
+  return stock ? stock.fromFeed !== false : true;
+}
 
 /**
  * Map a mapped catalogue product (Wheel | Tyre | WheelPackage | Accessory —
@@ -156,7 +229,11 @@ export function productToRow(
   if (!Number.isFinite(p.retailPriceIncVat) || p.retailPriceIncVat < 0) {
     return { ok: false, reason: `Retail price "${String(p.retailPriceIncVat)}" is not a number ≥ 0 — row skipped.` };
   }
-  if (typeof p.stockStatus !== "string" || p.stockStatus.trim() === "") {
+  // Only a product whose payload will CARRY a stock status must have one: a feed
+  // with no stock column leaves the catalogue's stock untouched (the column is
+  // omitted from the upsert), which is not the same as a malformed row.
+  const writesStock = productWritesStock(p);
+  if (writesStock && (typeof p.stockStatus !== "string" || p.stockStatus.trim() === "")) {
     return { ok: false, reason: "Missing stock status — row skipped." };
   }
 
@@ -168,6 +245,11 @@ export function productToRow(
   const brand = (p as { brand?: unknown }).brand;
   const brandOut = typeof brand === "string" && brand.trim() !== "" ? brand.trim() : null;
   const emptyFitment = { compatibility: [], fitments: [] };
+  // The feed's own stock figure rides into specs.stock (jsonb) so the quantity
+  // is really in the catalogue — and reads back — not just the status word.
+  const stockSpec = feedStockSpec((p as { feedStock?: FeedStock }).feedStock);
+  const withStock = (specs: Record<string, unknown>): Record<string, unknown> =>
+    stockSpec ? { ...specs, stock: stockSpec } : specs;
 
   let specs: Record<string, unknown>;
   let fitment: Record<string, unknown>;
@@ -175,7 +257,7 @@ export function productToRow(
 
   if (p.category === "wheels") {
     const w = p as Wheel;
-    specs = {
+    specs = withStock({
       supplierId: w.supplierId,
       diameter: w.size.diameter,
       width: w.size.width,
@@ -189,11 +271,11 @@ export function productToRow(
       // the price can be read back — and so the bulk price recalculation can
       // leave a supplier-published retail price alone.
       ...(w.feedAttributes ? { feed: w.feedAttributes } : {}),
-    };
+    });
     fitment = { compatibility: w.vehicleCompatibility ?? [], fitments: w.vehicleFitments ?? [] };
   } else if (p.category === "tyres") {
     const t = p as Tyre;
-    specs = {
+    specs = withStock({
       supplierId: t.supplierId,
       width: t.width,
       aspect: t.aspect,
@@ -201,7 +283,7 @@ export function productToRow(
       loadIndex: t.loadIndex,
       speedRating: t.speedRating,
       season: t.season,
-    };
+    });
     // Tyres carry sample fitment records too now (owner direction 2026-09-17:
     // tyres are the main line, and the fitment search serves both lines), so an
     // imported tyre row keeps whatever records the source provides. An empty
@@ -210,18 +292,18 @@ export function productToRow(
     fitment = { compatibility: [], fitments: t.vehicleFitments ?? [] };
   } else if (p.category === "packages") {
     const pk = p as WheelPackage;
-    specs = {
+    specs = withStock({
       // Packages have no supplierId on the model — store the slug id like the seed does.
       supplierId: pk.id,
       diameter: pk.diameter,
       wheelSpec: pk.wheelSpec ?? null,
       tyreSpec: pk.tyreSpec ?? null,
-    };
+    });
     fitment = { compatibility: [], fitments: pk.vehicleFitments ?? [] };
     package_contents = pk.includes ?? [];
   } else {
     const a = p as Accessory;
-    specs = { supplierId: a.supplierId };
+    specs = withStock({ supplierId: a.supplierId });
     fitment = emptyFitment;
   }
 
@@ -234,7 +316,10 @@ export function productToRow(
       brand: brandOut,
       price_gbp,
       rrp_gbp: null, // no RRP source in the feed — mirrors the seed
-      stock_status: p.stockStatus.trim(),
+      // Omitted entirely when the feed published no stock figure for the row:
+      // an upsert that does not mention stock_status leaves the catalogue's
+      // value exactly as it was (never zeroed as a side effect).
+      ...(writesStock ? { stock_status: p.stockStatus.trim() } : {}),
       images,
       specs,
       fitment,
@@ -263,6 +348,30 @@ export function mapProductsToRows(products: Product[]): {
     else skips.push({ id: p.id || "(no id)", reason: mapped.reason });
   }
   return { entries, skips };
+}
+
+/**
+ * Pure per-batch split used by importToCatalogue: a row that carries no stock
+ * figure is still writable when the product ALREADY exists (its payload omits
+ * stock_status, so the catalogue keeps whatever stock it has). A BRAND-NEW
+ * product with no stock figure is skipped — we never invent an availability for
+ * a product that has none on record. Exported so the regression script can pin
+ * this without a session or a write.
+ */
+export function partitionWritableRows(
+  entries: ProductRowDraft[],
+  existing: ReadonlySet<string>,
+): { writable: ProductRowDraft[]; skipped: ImportOutcomeItem[] } {
+  const writable: ProductRowDraft[] = [];
+  const skipped: ImportOutcomeItem[] = [];
+  for (const r of entries) {
+    if (!("stock_status" in r) && !existing.has(r.id)) {
+      skipped.push({ id: r.id, reason: `Skipped: ${NO_STOCK_NEW_ROW_MSG}` });
+      continue;
+    }
+    writable.push(r);
+  }
+  return { writable, skipped };
 }
 
 /**
@@ -304,6 +413,9 @@ export async function importToCatalogue(products: Product[]): Promise<ImportCata
       updated: 0,
       failed: 0,
       skipped: skips.length,
+      stockWritten: 0,
+      stockUntouched: 0,
+      stockSkipped: 0,
       failures: [],
       skips,
     };
@@ -312,6 +424,9 @@ export async function importToCatalogue(products: Product[]): Promise<ImportCata
   const created: string[] = [];
   const updated: string[] = [];
   const failures: ImportOutcomeItem[] = [];
+  let stockWritten = 0;
+  let stockUntouched = 0;
+  let stockSkipped = 0;
   const now = new Date().toISOString();
 
   for (let i = 0; i < entries.length; i += IMPORT_BATCH_SIZE) {
@@ -333,11 +448,22 @@ export async function importToCatalogue(products: Product[]): Promise<ImportCata
       );
     }
 
-    const rows = batch.map((r) => ({ ...r, updated_at: now }));
+    // A row with no stock figure is writable only when the product already
+    // exists — see partitionWritableRows (tested pure, no session needed).
+    const { writable, skipped: noStockSkips } = partitionWritableRows(batch, existing);
+    if (noStockSkips.length > 0) {
+      stockSkipped += noStockSkips.length;
+      skips.push(...noStockSkips);
+    }
+    if (writable.length === 0) continue;
+
+    const rows = writable.map((r) => ({ ...r, updated_at: now }));
     const { error: batchErr } = await client.from("products").upsert(rows, { onConflict: "id" });
 
     if (!batchErr) {
-      for (const r of batch) {
+      for (const r of writable) {
+        if ("stock_status" in r) stockWritten += 1;
+        else stockUntouched += 1;
         if (existing.has(r.id)) updated.push(r.id);
         else created.push(r.id);
       }
@@ -349,7 +475,7 @@ export async function importToCatalogue(products: Product[]): Promise<ImportCata
     // still the honest not-ready case: abort, nothing further written.
     if (isMissingTableError(batchErr)) return blocked(CATALOGUE_NOT_READY_MSG);
     const retried = await Promise.all(
-      batch.map(async (r) => {
+      writable.map(async (r) => {
         try {
           const { error: rowErr } = await client
             .from("products")
@@ -361,23 +487,37 @@ export async function importToCatalogue(products: Product[]): Promise<ImportCata
         }
       }),
     );
-    for (const outcome of retried) {
-      if (outcome.error) failures.push({ id: outcome.id, reason: outcome.error });
-      else if (existing.has(outcome.id)) updated.push(outcome.id);
+    for (const r of writable) {
+      const outcome = retried.find((o) => o.id === r.id);
+      if (!outcome || outcome.error) {
+        failures.push({ id: r.id, reason: outcome?.error ?? "no response for this row" });
+        continue;
+      }
+      if ("stock_status" in r) stockWritten += 1;
+      else stockUntouched += 1;
+      if (existing.has(outcome.id)) updated.push(outcome.id);
       else created.push(outcome.id);
     }
   }
 
+  // "Nothing written" is never a success: a run whose every row was skipped
+  // carries an honest error, exactly like a blocked run (see importWroteAnything).
+  const wroteAnything = created.length + updated.length > 0;
   return {
-    ok: failures.length === 0,
+    ok: wroteAnything && failures.length === 0,
     error:
       failures.length > 0
         ? `${failures.length} product row${failures.length === 1 ? "" : "s"} failed to write — see the failure list.`
-        : undefined,
+        : !wroteAnything
+          ? NOTHING_WRITTEN_MSG
+          : undefined,
     created: created.length,
     updated: updated.length,
     failed: failures.length,
     skipped: skips.length,
+    stockWritten,
+    stockUntouched,
+    stockSkipped,
     failures,
     skips,
   };
