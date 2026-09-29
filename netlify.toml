@@ -9,3 +9,8 @@
 # SUPABASE_URL / SUPABASE_ANON_KEY are absent, so it deploys regardless.
 # Add those two under Netlify → Site settings → Environment when going live
 # with the real catalogue.
+
+# Git-build path: Netlify reads THIS toml; the generated function lives inside
+# the publish directory, so point the functions dir at it explicitly.
+[functions]
+  directory = "dist-netlify/netlify/functions"
