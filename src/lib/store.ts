@@ -18,6 +18,7 @@
  * surface for that phase.
  */
 import type {
+  FeedStock,
   PackageTyreSpec,
   StockStatus,
   Tyre,
@@ -143,6 +144,25 @@ function fitmentRecords(fitment: unknown): VehicleFitment[] | undefined {
 
 const FEED_PRICE_SOURCES = ["retailIncVat", "retailExVat", "tradePrice"] as const;
 
+/**
+ * Parse product.specs.stock jsonb -> the feed's own stock figure for the row
+ * (written by the importer; see importPersistence.feedStockSpec). Absent on rows
+ * that were not imported from a feed with a stock column.
+ */
+function feedStockFromSpecs(specs: Record<string, unknown>): FeedStock | undefined {
+  const raw = specs.stock;
+  if (!raw || typeof raw !== "object") return undefined;
+  const s = raw as Record<string, unknown>;
+  const quantity = typeof s.quantity === "number" && Number.isFinite(s.quantity) ? s.quantity : undefined;
+  const statusCode = toStr(s.statusCode);
+  if (quantity === undefined && statusCode === "") return undefined;
+  return {
+    fromFeed: true,
+    ...(quantity !== undefined ? { quantity } : {}),
+    ...(statusCode !== "" ? { statusCode } : {}),
+  };
+}
+
 /** Parse product.specs.feed jsonb -> the feed's own published prices/specs. */
 function feedAttributes(specs: Record<string, unknown>): FeedAttributes | undefined {
   const raw = specs.feed;
@@ -215,6 +235,9 @@ export function rowToProduct(row: ProductRow): Product | null {
     stockStatus,
     image,
     description,
+    // The feed's own stock figure, when the row was imported from a feed that
+    // publishes one (specs.stock). Undefined on sample/seed rows.
+    feedStock: feedStockFromSpecs(specs),
   };
 
   if (category === "wheels") {

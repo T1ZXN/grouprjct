@@ -42,6 +42,7 @@ import type {
   Accessory,
   CategorySlug,
   FeedAttributes,
+  FeedStock,
   StockStatus,
   Tyre,
   Wheel,
@@ -152,6 +153,19 @@ export interface SupplierFeedRow {
   finish?: string;
   supplierPriceEur: number;
   stock: string;
+  /**
+   * Sellable quantity as published by the feed (owner rule: a supply feed's
+   * "stock" means the sellable quantity of that fitment). `undefined` when the
+   * feed published no usable number for this row — never defaulted to 0.
+   */
+  stockQty?: number;
+  /**
+   * True when this row's feed actually carried a stock figure (a status word or
+   * a quantity). False means the feed has no stock column (or the cell is empty)
+   * — the importer then leaves the catalogue's stock_status UNTOUCHED rather
+   * than zeroing it as a side effect. See resolveFeedStock().
+   */
+  hasFeedStock?: boolean;
   category: CategorySlug;
   includedBolts?: string;
   /* Tyre-only fields (a tyre row uses these instead of wheel geometry). */
@@ -265,6 +279,8 @@ function parseCsvTable(text: string): string[][] {
 const HEADER_ALIASES: Record<string, string> = {
   product: "name",
   productname: "name",
+  producttitle: "name",
+  title: "name",
   manufacturer: "brand",
   image: "images",
   imageurl: "images",
@@ -287,6 +303,35 @@ const HEADER_ALIASES: Record<string, string> = {
   availability: "stock",
   stocklevel: "stock",
   inout: "stock",
+  // A bare "In stock" / "Available" column may hold either a word OR a count —
+  // resolveFeedStock() interprets it either way, so both are carried as `stock`.
+  instock: "stock",
+  available: "stock",
+  /* ── Stock QUANTITY columns: folded onto the canonical `stockqty` key ──────
+   * A supply feed's quantity column is named many things (owner brief: "stock,
+   * qty, quantity, amount, balance, onhand …"). Every one of those variants now
+   * lands on `stockqty` instead of being silently dropped. A numeric `stock`
+   * column is handled too — see resolveFeedStock(). */
+  stockqty: "stockqty",
+  stockquantity: "stockqty",
+  qty: "stockqty",
+  quantity: "stockqty",
+  qtyinstock: "stockqty",
+  instockqty: "stockqty",
+  quantityinstock: "stockqty",
+  numinstock: "stockqty",
+  numbersinstock: "stockqty",
+  quantityavailable: "stockqty",
+  qtyavailable: "stockqty",
+  availableqty: "stockqty",
+  stockavailable: "stockqty",
+  stockcount: "stockqty",
+  amount: "stockqty",
+  balance: "stockqty",
+  onhand: "stockqty",
+  onhandqty: "stockqty",
+  freestock: "stockqty",
+  totalstock: "stockqty",
   pcd: "pcd",
   boltpattern: "pcd",
   pitchcirclediameter: "pcd",
@@ -315,17 +360,24 @@ export function normalizeHeaderName(raw: string): string {
 /**
  * The `wheelTrade` column-mapping strategy: the feed's OWN header names → the
  * canonical keys the wheel-trade row validator reads. Every column we carry is
- * listed; unmapped columns (blank part number, blank offset range, "original",
- * "offset blanks", max centre bore …) are deliberately ignored rather than
- * guessed at.
+ * listed — SKU/part number, the product title/design, rim size + PCD + offset
+ * (incl. the blank-wheel offset range), every recognised stock/quantity column,
+ * and the three price columns. Columns nothing reads yet ("offset blanks", max
+ * centre bore, "original"…) are carried verbatim into the product's feed specs
+ * or ignored rather than guessed at.
  */
 export const WHEEL_TRADE_COLUMN_MAP: Record<string, string> = {
   sku: "supplierid",
   partnumber: "supplierid",
   productcode: "supplierid",
+  manufacturerpartnumber: "supplierid",
+  mpn: "supplierid",
   brand: "brand",
   design: "design",
   model: "design",
+  title: "design",
+  producttitle: "design",
+  productname: "design",
   color: "colour",
   colour: "colour",
   width: "width",
@@ -344,15 +396,35 @@ export const WHEEL_TRADE_COLUMN_MAP: Record<string, string> = {
   centerbore: "centrebore",
   maxcentrebore: "maxcentrebore",
   weight: "weight",
+  // ── Stock: every recognised quantity column name folds onto the UK count ──
   ukstock: "ukstock",
   stock: "ukstock",
   stocklevel: "ukstock",
+  instock: "ukstock",
   qty: "ukstock",
   quantity: "ukstock",
+  stockqty: "ukstock",
+  stockquantity: "ukstock",
+  qtyinstock: "ukstock",
+  instockqty: "ukstock",
+  stockcount: "ukstock",
+  amount: "ukstock",
+  balance: "ukstock",
+  onhand: "ukstock",
+  onhandqty: "ukstock",
+  freestock: "ukstock",
+  stockavailable: "ukstock",
   europestock: "europestock",
   eustock: "europestock",
   europeanstock: "europestock",
+  eustockqty: "europestock",
   totalstock: "totalstock",
+  // Blank (undrilled) wheels publish an offset RANGE instead of a fixed offset.
+  blankminoffset: "blankminoffset",
+  blankmaxoffset: "blankmaxoffset",
+  offsetblanks: "offsetblanks",
+  blankpartnumber: "blankpartnumber",
+  original: "original",
   tradeprice: "tradeprice",
   trade: "tradeprice",
   tradepriceexvat: "tradeprice",
@@ -436,9 +508,113 @@ function posNum(s: string | undefined): number | undefined {
   return n !== undefined && n > 0 ? n : undefined;
 }
 
+/* ── Stock: quantity parsing + resolution (owner rule) ─────────────────────── */
+
+/**
+ * Parse a supplier-feed QUANTITY: the sellable count of a tyre/wheel fitment.
+ *
+ * Deliberately tolerant but never inventive — anything that is not a plain
+ * number is `undefined` (the row's stock is then simply not taken from the
+ * feed), and this NEVER throws:
+ *   "12" " 12 " "12.0"  → 12          (a wheel/tyre count is a whole number,
+ *                                      but a fractional figure is preserved)
+ *   "1,234"             → 1234        (thousands separator)
+ *   "12,5"              → 12.5        (comma used as the decimal separator)
+ *   "0"                 → 0           (a real published zero = out of stock)
+ *   "" "-" "n/a" "in_stock" "12 pcs" "-3"  → undefined (skipped, never guessed)
+ */
+export function parseStockQuantity(raw: string | number | null | undefined): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) && raw >= 0 ? raw : undefined;
+  }
+  const t = String(raw).trim().replace(/^["']|["']$/g, "").replace(/\s+/g, "");
+  if (t === "") return undefined;
+  const numeric = (s: string): number | undefined => {
+    const n = Number(s);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  // Grouped thousands first ("1,234" must not read as 1.234): 1,234 / 1,234.5
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(t)) return numeric(t.replace(/,/g, ""));
+  // European grouping (1.234.567 / 1.234,5) — two or more groups, so a plain
+  // "1.234" still reads as a decimal rather than being guessed at.
+  if (/^\d{1,3}(?:\.\d{3}){2,}(?:,\d+)?$/.test(t)) {
+    return numeric(t.replace(/\./g, "").replace(",", "."));
+  }
+  // Plain number, with an optional decimal part (dot or comma separated).
+  if (/^\d+(?:[.,]\d+)?$/.test(t)) return numeric(t.replace(",", "."));
+  return undefined;
+}
+
+/** The feed's stock verdict for ONE row (see SupplierFeedRow.hasFeedStock). */
+export interface FeedStockResolution {
+  /** The feed's own stock code, e.g. "in_stock"; "" when it published none. */
+  statusCode: string;
+  /** Sellable quantity as published, when the feed gave a number. */
+  quantity?: number;
+  /** True when the feed carried stock information for this row at all. */
+  fromFeed: boolean;
+}
+
+/** Canonical quantity keys, in priority order, for feeds that bypass the header map. */
+const QUANTITY_KEYS = [
+  "stockqty",
+  "qty",
+  "quantity",
+  "stockcount",
+  "onhand",
+  "onhandqty",
+  "amount",
+  "balance",
+  "totalstock",
+  "freestock",
+  "stockavailable",
+] as const;
+
+/**
+ * Work out what ONE feed record says about stock, tolerating every way the
+ * columns come in:
+ *   • a quantity column under any recognised name (`stockqty`, `qty`,
+ *     `quantity`, `amount`, `balance`, `onhand`, …) → that count;
+ *   • a status column (`stock`, `stock status`, `availability`, `stock level`,
+ *     `in/out`, `in stock`, `available`) holding a word → that code;
+ *   • a status-named column holding a NUMBER → a count (a feed that puts the
+ *     sellable quantity in a column called "Stock" is the common case).
+ * A count decides the status honestly: > 0 in stock, 0 out of stock. With no
+ * column at all, `fromFeed` is false and the catalogue's stock is left alone.
+ */
+export function resolveFeedStock(record: Record<string, string>): FeedStockResolution {
+  let quantity: number | undefined;
+  for (const key of QUANTITY_KEYS) {
+    const q = parseStockQuantity(record[key]);
+    if (q !== undefined) {
+      quantity = q;
+      break;
+    }
+  }
+
+  let statusCode = (record.stock ?? "").trim();
+  if (statusCode !== "") {
+    const asCount = parseStockQuantity(statusCode);
+    if (asCount !== undefined) {
+      if (quantity === undefined) quantity = asCount;
+      statusCode = ""; // a number is a count, not a status word
+    }
+  }
+
+  if (statusCode === "" && quantity !== undefined) {
+    statusCode = quantity > 0 ? "in_stock" : "out_of_stock";
+  }
+  return { statusCode, quantity, fromFeed: statusCode !== "" || quantity !== undefined };
+}
+
 /** Validate one record (lower-cased CSV/XML columns) -> row + per-field errors. */
 export function validateFeedRow(record: Record<string, string>, _rowNo: number): RowOutcome {
   const errors: string[] = [];
+  // Stock comes from whatever the feed publishes — a status word OR a sellable
+  // count (see resolveFeedStock). A feed with no stock column at all yields
+  // fromFeed:false, which leaves the catalogue's stock untouched on upsert.
+  const stock = resolveFeedStock(record);
   const row: SupplierFeedRow = {
     supplierId: (record.supplierid ?? "").trim(),
     name: (record.name ?? "").trim(),
@@ -448,7 +624,9 @@ export function validateFeedRow(record: Record<string, string>, _rowNo: number):
       .map((s) => s.trim())
       .filter(Boolean),
     supplierPriceEur: 0,
-    stock: (record.stock ?? "").trim(),
+    stock: stock.statusCode,
+    stockQty: stock.quantity,
+    hasFeedStock: stock.fromFeed,
     category: "wheels",
     includedBolts: (record.includedbolts ?? "").trim() || undefined,
   };
@@ -614,6 +792,22 @@ export function validateWheelTradeRow(record: Record<string, string>, _rowNo: nu
   const ukStock = num(record.ukstock);
   const europeStock = num(record.europestock);
   const totalStock = num(record.totalstock);
+  // The feed's own published counts decide both the status and the sellable
+  // quantity we report. `hasFeedStock` is false when the feed has NO stock
+  // column (or every stock cell is blank) — then the catalogue's stock status is
+  // left exactly as it is instead of being zeroed by a price-only re-import.
+  const hasFeedStock = ukStock !== undefined || europeStock !== undefined || totalStock !== undefined;
+  const stockCode = stockCodeFromCounts(ukStock, europeStock);
+  // The warehouse the status refers to is the count that matters: UK when the
+  // wheel is in the UK, otherwise the European count we can order from.
+  const sellableQty =
+    (ukStock ?? 0) > 0
+      ? ukStock
+      : (europeStock ?? 0) > 0
+        ? europeStock
+        : totalStock !== undefined
+          ? totalStock
+          : (ukStock ?? europeStock);
 
   const feedExtra: Record<string, string> = {};
   const carry = (key: string, value: string | undefined) => {
@@ -624,6 +818,7 @@ export function validateWheelTradeRow(record: Record<string, string>, _rowNo: nu
     "wheelSize",
     (record.wheelsize ?? "").trim() || `${widthRaw || width}x${diameter}`,
   );
+  carry("blankPartNumber", record.blankpartnumber);
   carry("centreBore", record.centrebore);
   carry("maxCentreBore", record.maxcentrebore);
   carry("loadRating", record.loadrating);
@@ -635,6 +830,7 @@ export function validateWheelTradeRow(record: Record<string, string>, _rowNo: nu
   carry("fiveYearWarranty", record.fiveyear);
   carry("winter", record.winter);
   carry("fixedPrice", record.fixedprice);
+  carry("original", record.original);
 
   const name = [design || brand, colour].filter(Boolean).join(" ") || supplierId;
 
@@ -656,7 +852,9 @@ export function validateWheelTradeRow(record: Record<string, string>, _rowNo: nu
     // shows it as both the colour and the finish (nothing is invented).
     finish: colour || undefined,
     supplierPriceEur: 0, // GBP feed — see priceCurrency / tradePriceGbp below
-    stock: stockCodeFromCounts(ukStock, europeStock),
+    stock: hasFeedStock ? stockCode : "",
+    stockQty: hasFeedStock ? sellableQty : undefined,
+    hasFeedStock,
     category: "wheels",
     includedBolts: undefined,
     priceCurrency: "GBP",
@@ -848,6 +1046,15 @@ export function mapFeedRowToProduct(
   const id = `imp-${slugify(row.supplierId)}`;
   const image = row.images[0] ?? CATEGORY_IMAGE[row.category];
   const stockStatus: StockStatus = mapFeedStockToStatus(row.stock);
+  // What the FEED said about stock, carried onto the product so the write step
+  // knows whether to set the catalogue's stock_status or leave it untouched
+  // (see FeedStock / productToRow). `fromFeed` defaults to true for a row built
+  // by hand without the flag — the pre-existing behaviour.
+  const feedStock: FeedStock = {
+    fromFeed: row.hasFeedStock !== false,
+    ...(row.stockQty !== undefined ? { quantity: row.stockQty } : {}),
+    ...(row.stock !== "" ? { statusCode: row.stock } : {}),
+  };
 
   /* ── GBP trade/retail feed (owner's rule) ── */
   if (row.priceCurrency === "GBP") {
@@ -893,6 +1100,7 @@ export function mapFeedRowToProduct(
         supplierPriceEur: gbpToEur(row.tradePriceGbp ?? 0, settings),
         retailPriceIncVat: priceIncVat,
         stockStatus,
+        feedStock,
         includedBolts: row.includedBolts ?? "",
         image,
         description: `${brand} ${row.name} — supplier feed import; the retail price and specs are exactly as published by the supplier. We confirm the exact fitment for your vehicle before confirming your order.`,
@@ -929,6 +1137,7 @@ export function mapFeedRowToProduct(
       supplierPriceEur: row.supplierPriceEur,
       retailPriceIncVat: retail,
       stockStatus,
+      feedStock,
       includedBolts: row.includedBolts ?? "",
       image,
       description: `${row.brand || "Forzza"} ${row.name} — mapped from demo feed import. Sample data.`,
@@ -955,6 +1164,7 @@ export function mapFeedRowToProduct(
       supplierPriceEur: row.supplierPriceEur,
       retailPriceIncVat: retail,
       stockStatus,
+      feedStock,
       image,
       description: `${row.brand || "Forzza"} ${row.name} — mapped from demo feed import. Sample data.`,
     };
@@ -973,6 +1183,7 @@ export function mapFeedRowToProduct(
       supplierPriceEur: row.supplierPriceEur,
       retailPriceIncVat: retail,
       stockStatus,
+      feedStock,
       image,
       description: `${row.name} — mapped from demo feed import. Sample data.`,
     };
@@ -987,6 +1198,7 @@ export function mapFeedRowToProduct(
     supplierPriceEur: row.supplierPriceEur,
     retailPriceIncVat: retail,
     stockStatus,
+    feedStock,
     image,
     description: `${row.name} — mapped from demo feed import. Sample data.`,
   };
