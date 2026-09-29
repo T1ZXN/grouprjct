@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Breadcrumb, SpecTable } from "~/components/SpecTable";
 import { StockChip } from "~/components/ProductCard";
+import { ProductImg } from "~/components/ProductImg";
 import { FitmentChecker } from "~/components/FitmentChecker";
 import { DEMO_NOTICE, demoTypes, tyreSizeLabel } from "~/data/products";
 import type { Tyre } from "~/data/products";
@@ -54,7 +55,7 @@ function TyreDetail({ tyre }: { tyre: Tyre }) {
 
         <div className="mt-6 grid gap-10 lg:grid-cols-2 lg:items-start">
           <div className="overflow-hidden rounded-xl border border-white/10 bg-carbon">
-            <img
+            <ProductImg
               src={tyre.image}
               alt={`${tyre.brand} ${tyre.name} tyre ${tyreSizeLabel(tyre)}`}
               className="aspect-square w-full object-cover"

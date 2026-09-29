@@ -1,6 +1,7 @@
 import { basketTotals, lineTotal, lineKey } from "~/lib/basket";
 import type { BasketLine } from "~/lib/basket";
 import { formatGBP } from "~/lib/pricing";
+import { ProductImg } from "~/components/ProductImg";
 
 /**
  * Shared order pieces for /basket and /checkout: the money panel (subtotal,
@@ -70,7 +71,7 @@ export function OrderSummaryLines({ lines }: { lines: BasketLine[] }) {
       {lines.map((line) => (
         <li key={lineKey(line)} className="flex items-start gap-3 py-3">
           {line.image ? (
-            <img
+            <ProductImg
               src={line.image}
               alt=""
               className="h-14 w-14 shrink-0 rounded-md border border-white/10 object-cover"

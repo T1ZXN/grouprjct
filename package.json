@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "test:reglookup": "bun ./scripts/test-reglookup.ts",
     "test:account": "bun ./scripts/test-account.ts",
-    "test:wheel-pricing": "bun ./scripts/test-wheel-pricing.ts"
+    "test:wheel-pricing": "bun ./scripts/test-wheel-pricing.ts",
+    "test:facets": "bun ./scripts/test-catalogue-facets.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

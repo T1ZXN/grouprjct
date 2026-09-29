@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Breadcrumb, SpecTable } from "~/components/SpecTable";
 import { StockChip } from "~/components/ProductCard";
+import { ProductImg } from "~/components/ProductImg";
 import { FitmentChecker } from "~/components/FitmentChecker";
 import { AddToBasket } from "~/components/AddToBasket";
 import { DEMO_NOTICE, demoWheels, wheelSizeLabel } from "~/data/products";
 import type { Wheel } from "~/data/products";
 import { formatGBP } from "~/lib/pricing";
+import { wheelOffsetDisplay } from "~/lib/facets";
 import { useLiveProduct } from "~/lib/liveCatalogue";
 
 /** Canonical site base used for JSON-LD absolute URLs (never localhost). */
@@ -101,7 +103,7 @@ function WheelDetail({ wheel }: { wheel: Wheel }) {
         <div className="mt-6 grid gap-10 lg:grid-cols-2 lg:items-start">
           {/* Hero image */}
           <div className="overflow-hidden rounded-xl border border-white/10 bg-carbon">
-            <img
+            <ProductImg
               src={wheel.image}
               alt={`${wheel.brand} ${wheel.name} alloy wheel`}
               className="aspect-square w-full object-cover"
@@ -158,7 +160,7 @@ function WheelDetail({ wheel }: { wheel: Wheel }) {
               { label: "Diameter", value: `${wheel.size.diameter}"` },
               { label: "Width", value: wheel.size.width },
               { label: "PCD", value: wheel.size.pcd },
-              { label: "Offset (ET)", value: wheel.size.offset },
+              { label: "Offset (ET)", value: wheelOffsetDisplay(wheel.size.offset) },
               { label: "Colour", value: wheel.colour },
               { label: "Finish", value: wheel.finish },
               {

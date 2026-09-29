@@ -9,6 +9,7 @@ import { useLiveCatalogue } from "~/lib/liveCatalogue";
 import { formatGBP } from "~/lib/pricing";
 import { applyPriceSort, parseVehicleParam, SORT_OPTIONS, toSearchString } from "~/lib/catalogue";
 import type { PriceSort } from "~/lib/catalogue";
+import { facetOptions, tyreLoadIndexValue } from "~/lib/facets";
 
 interface TyresSearch {
   q?: string;
@@ -21,6 +22,8 @@ interface TyresSearch {
   width?: string;
   aspect?: string;
   rim?: string;
+  /** Numeric load index (facet of the stored marking "91Y"/"96Y XL" → 91/96). */
+  load?: string;
   brand?: string;
   season?: string;
   priceMin?: string;
@@ -29,7 +32,17 @@ interface TyresSearch {
   sort?: string;
 }
 
-const FILTER_KEYS = ["width", "aspect", "rim", "brand", "season", "priceMin", "priceMax", "availability"];
+const FILTER_KEYS = [
+  "width",
+  "aspect",
+  "rim",
+  "load",
+  "brand",
+  "season",
+  "priceMin",
+  "priceMax",
+  "availability",
+];
 
 const unique = (values: string[]): string[] => [...new Set(values)];
 
@@ -40,6 +53,7 @@ export const Route = createFileRoute("/tyres")({
     width: toSearchString(search.width),
     aspect: toSearchString(search.aspect),
     rim: toSearchString(search.rim),
+    load: toSearchString(search.load),
     brand: toSearchString(search.brand),
     season: toSearchString(search.season),
     priceMin: toSearchString(search.priceMin),
@@ -89,6 +103,14 @@ function TyresPage() {
   );
   const brandOptions = useMemo(() => unique(items.map((t) => t.brand)), [items]);
   const seasonOptions = useMemo(() => unique(items.map((t) => t.season)), [items]);
+  // Load facet: the numeric load index parsed from the stored marking
+  // ("91Y" → 91, "96Y XL" → 96) — see src/lib/facets.ts. Rows whose marking
+  // carries no number (possible until the owner re-imports the tyre feeds)
+  // simply don't contribute an option; nothing is invented for them.
+  const loadOptions = useMemo(
+    () => facetOptions(items.map((t) => tyreLoadIndexValue(t.loadIndex)), "numeric"),
+    [items],
+  );
 
 
   const setFilter = (key: string, value: string | undefined) => {
@@ -122,6 +144,7 @@ function TyresPage() {
       if (search.width && String(t.width) !== search.width) return false;
       if (search.aspect && String(t.aspect) !== search.aspect) return false;
       if (search.rim && String(t.rimDiameter) !== search.rim) return false;
+      if (search.load && tyreLoadIndexValue(t.loadIndex) !== search.load) return false;
       if (search.brand && t.brand !== search.brand) return false;
       if (search.season && t.season !== search.season) return false;
       if (hasMin && t.retailPriceIncVat < min!) return false;
@@ -158,12 +181,18 @@ function TyresPage() {
   return (
     <CataloguePage
       title="Tyres"
-      blurb="Performance summer, all-season and winter tyres to match your fitment — filter by size, season, brand and price."
+      blurb="Performance summer, all-season and winter tyres to match your fitment — filter by size, load index, season, brand and price."
       fields={[
         { key: "q", label: "Search", type: "text", placeholder: "Search tyres…" },
         { key: "width", label: "Width (mm)", type: "select", options: widthOptions.map((v) => ({ value: v, label: v })) },
         { key: "aspect", label: "Aspect / profile", type: "select", options: aspectOptions.map((v) => ({ value: v, label: v })) },
         { key: "rim", label: "Rim diameter", type: "select", options: rimOptions.map((v) => ({ value: v, label: `${v}"` })) },
+        {
+          key: "load",
+          label: "Load index",
+          type: "select",
+          options: loadOptions,
+        },
         { key: "brand", label: "Brand", type: "select", options: brandOptions.map((v) => ({ value: v, label: v })) },
         { key: "season", label: "Season", type: "select", options: seasonOptions.map((v) => ({ value: v, label: v })) },
         { key: "priceMin", label: "Min price (£)", type: "number", placeholder: "e.g. 80", min: 0 },

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { ProductImg } from "~/components/ProductImg";
 import { stockTone } from "~/data/products";
 import type { StockStatus } from "~/data/products";
 
@@ -74,7 +75,7 @@ export function ProductCard({
       }`}
     >
       <Link to={href} aria-label={imageAlt} className="block aspect-square overflow-hidden bg-coal">
-        <img
+        <ProductImg
           src={image}
           alt={imageAlt}
           loading="lazy"
