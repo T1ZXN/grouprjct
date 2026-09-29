@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useBasket } from "~/components/BasketProvider";
 import { OrderTotals } from "~/components/OrderSummary";
+import { ProductImg } from "~/components/ProductImg";
 import {
   basketCategoryLabel,
   lineKey,
@@ -154,7 +155,7 @@ function BasketRow({
 }) {
   return (
     <li className="flex flex-wrap items-center gap-4 p-4 sm:flex-nowrap">
-      <img
+      <ProductImg
         src={line.image}
         alt=""
         className="h-20 w-20 shrink-0 rounded-lg border border-white/10 object-cover"

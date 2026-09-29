@@ -8,6 +8,12 @@ import type { Wheel } from "~/data/products";
 import { useLiveCatalogue } from "~/lib/liveCatalogue";
 import { formatGBP } from "~/lib/pricing";
 import {
+  facetOptions,
+  normaliseWheelBrand,
+  wheelModelFromName,
+  wheelOffsetEt,
+} from "~/lib/facets";
+import {
   applyPriceSort,
   isCompatible,
   parseVehicleParam,
@@ -22,9 +28,14 @@ interface WheelsSearch {
   diameter?: string;
   width?: string;
   pcd?: string;
+  /** Numeric offset (ET) — facet value of the stored "ET38"/"0" offset. */
+  offset?: string;
   colour?: string;
   finish?: string;
+  /** Normalised brand ("Wolfrace"), not the feed's sub-brand string. */
   brand?: string;
+  /** The wheel's design/model ("Venom", "Wolfsburg GTR", …). */
+  model?: string;
   priceMin?: string;
   priceMax?: string;
   availability?: string;
@@ -36,9 +47,11 @@ const FILTER_KEYS = [
   "diameter",
   "width",
   "pcd",
+  "offset",
   "colour",
   "finish",
   "brand",
+  "model",
   "priceMin",
   "priceMax",
   "availability",
@@ -53,9 +66,11 @@ export const Route = createFileRoute("/wheels")({
     diameter: toSearchString(search.diameter),
     width: toSearchString(search.width),
     pcd: toSearchString(search.pcd),
+    offset: toSearchString(search.offset),
     colour: toSearchString(search.colour),
     finish: toSearchString(search.finish),
     brand: toSearchString(search.brand),
+    model: toSearchString(search.model),
     priceMin: toSearchString(search.priceMin),
     priceMax: toSearchString(search.priceMax),
     availability: toSearchString(search.availability),
@@ -95,9 +110,25 @@ function WheelsPage() {
   );
   const widthOptions = useMemo(() => unique(items.map((w) => w.size.width)), [items]);
   const pcdOptions = useMemo(() => unique(items.map((w) => w.size.pcd)), [items]);
+  // Facets use normalised values: the brand facet collapses the feed's
+  // sub-brand strings ("Wolfrace Eurosport", "Wolfhart Flowformed"…) onto the
+  // real brand; the offset facet is the numeric ET; the model facet is the
+  // feed's design value recovered from the importer-composed name. See
+  // src/lib/facets.ts for the rules.
+  const brandOptions = useMemo(
+    () => facetOptions(items.map((w) => normaliseWheelBrand(w.brand))),
+    [items],
+  );
+  const modelOptions = useMemo(
+    () => facetOptions(items.map((w) => wheelModelFromName(w.name, w.colour))),
+    [items],
+  );
+  const offsetOptions = useMemo(
+    () => facetOptions(items.map((w) => wheelOffsetEt(w.size.offset)), "numeric"),
+    [items],
+  );
   const colourOptions = useMemo(() => unique(items.map((w) => w.colour)), [items]);
   const finishOptions = useMemo(() => unique(items.map((w) => w.finish)), [items]);
-  const brandOptions = useMemo(() => unique(items.map((w) => w.brand)), [items]);
 
   const { q, vehicle, sort } = search;
 
@@ -132,9 +163,11 @@ function WheelsPage() {
       if (search.diameter && String(w.size.diameter) !== search.diameter) return false;
       if (search.width && w.size.width !== search.width) return false;
       if (search.pcd && w.size.pcd !== search.pcd) return false;
+      if (search.offset && wheelOffsetEt(w.size.offset) !== search.offset) return false;
       if (search.colour && w.colour !== search.colour) return false;
       if (search.finish && w.finish !== search.finish) return false;
-      if (search.brand && w.brand !== search.brand) return false;
+      if (search.brand && normaliseWheelBrand(w.brand) !== search.brand) return false;
+      if (search.model && wheelModelFromName(w.name, w.colour) !== search.model) return false;
       if (hasMin && w.retailPriceIncVat < min!) return false;
       if (hasMax && w.retailPriceIncVat > max!) return false;
       if (search.availability && w.stockStatus !== search.availability) return false;
@@ -168,7 +201,7 @@ function WheelsPage() {
   return (
     <CataloguePage
       title="Alloy Wheels"
-      blurb="Performance alloy wheels in gloss, matte, satin and machined finishes. Filter by diameter, width, PCD, offset and colour — every price is settings-driven from central pricing."
+      blurb="Performance alloy wheels in gloss, matte, satin and machined finishes. Filter by brand, model, size, PCD, offset (ET) and colour — every price is settings-driven from central pricing."
       fields={[
         { key: "q", label: "Search", type: "text", placeholder: "Search wheels…" },
         {
@@ -179,9 +212,21 @@ function WheelsPage() {
         },
         { key: "width", label: "Width", type: "select", options: widthOptions.map((v) => ({ value: v, label: v })) },
         { key: "pcd", label: "PCD", type: "select", options: pcdOptions.map((v) => ({ value: v, label: v })) },
+        {
+          key: "offset",
+          label: "Offset (ET)",
+          type: "select",
+          options: offsetOptions,
+        },
         { key: "colour", label: "Colour", type: "select", options: colourOptions.map((v) => ({ value: v, label: v })) },
         { key: "finish", label: "Finish", type: "select", options: finishOptions.map((v) => ({ value: v, label: v })) },
-        { key: "brand", label: "Brand", type: "select", options: brandOptions.map((v) => ({ value: v, label: v })) },
+        { key: "brand", label: "Brand", type: "select", options: brandOptions },
+        {
+          key: "model",
+          label: "Model",
+          type: "select",
+          options: modelOptions,
+        },
         { key: "priceMin", label: "Min price (£)", type: "number", placeholder: "e.g. 150", min: 0 },
         { key: "priceMax", label: "Max price (£)", type: "number", placeholder: "e.g. 300", min: 0 },
         {
