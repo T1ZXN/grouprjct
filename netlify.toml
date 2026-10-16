@@ -14,3 +14,8 @@
 # the publish directory, so point the functions dir at it explicitly.
 [functions]
   directory = "dist-netlify/netlify/functions"
+
+# Git-build path: pin Node so Netlify image updates cannot break the build
+# (mirrors the generated export toml, which pins NODE_VERSION=20 for zips).
+[build.environment]
+  NODE_VERSION = "20"
