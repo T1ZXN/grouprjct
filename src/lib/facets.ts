@@ -159,3 +159,54 @@ export function facetOptions(
   }
   return unique.map((v) => ({ value: v, label: v }));
 }
+/* ── Wheel centre bore (CB) ───────────────────────────────────────────────── */
+/**
+ * The CENTRE BORE facet value from the feed's own centreBore column, carried
+ * verbatim in specs.feed.extra.centreBore (mapped to
+ * feedAttributes.extra.centreBore by the store). "110" → "110", "84.1" →
+ * "84.1" — decimals are NOT reformatted, because the feed's own value IS the
+ * facet value, so the URL param, the filter comparison and the option text can
+ * never drift. A numerically-typed column (a future feed shape) passes through
+ * String() unchanged. Missing or blank → "" — the row contributes NOTHING to
+ * the CB facet (never invented, the same honesty rule as the load facet:
+ * today the Wolfrace/ATS/Alutec feeds carry the column; Forzza rows do not).
+ */
+export function wheelCentreBore(raw: string | number | undefined | null): string {
+  return raw === undefined || raw === null ? "" : String(raw).trim();
+}
+/* ── Wheel model dropdown grouped by brand ────────────────────────────────── */
+/**
+ * The unfiltered Model dropdown's options, GROUPED BY BRAND: every normalised
+ * brand (normaliseWheelBrand) becomes a group whose options are that brand's
+ * models (wheelModelFromName), de-duplicated and alphabetically sorted.
+ * Rendered as native <optgroup>s, so mobile pickers show the group labels as
+ * section headers — clearer than one flat multi-brand model list.
+ *
+ * Option VALUES stay the bare model name (no brand prefix), so a grouped pick
+ * sets exactly the same ?model= param the brand-scoped dropdown sets and the
+ * filter comparison can never drift. (If two brands ever shipped the same
+ * model name, a grouped pick would match both — today's catalogue has no such
+ * collision, and picking a brand first always scopes exactly.)
+ *
+ * Groups are sorted by brand label; a group is emitted only when it has
+ * models. A row with a model but NO brand (none in today's data) groups under
+ * the heading "Other brands" so nothing silently disappears — that is a
+ * grouping label, not a stored or invented brand.
+ */
+export function wheelModelGroups(
+  rows: readonly { brand: string; name: string; colour?: string | null }[],
+): { label: string; options: { value: string; label: string }[] }[] {
+  const byBrand = new Map<string, string[]>();
+  for (const r of rows) {
+    const model = wheelModelFromName(r.name, r.colour);
+    if (model === "") continue;
+    const brand = normaliseWheelBrand(r.brand);
+    const label = brand === "" ? "Other brands" : brand;
+    const list = byBrand.get(label);
+    if (list) list.push(model);
+    else byBrand.set(label, [model]);
+  }
+  return [...byBrand.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([label, models]) => ({ label, options: facetOptions(models) }));
+}

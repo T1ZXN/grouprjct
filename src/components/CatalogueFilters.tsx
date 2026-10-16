@@ -17,6 +17,12 @@ export interface FilterField {
   type: "select" | "text" | "number";
   /** For type "select": { value: "" } is rendered as "All". */
   options?: { value: string; label: string }[];
+  /**
+   * For type "select": grouped options, rendered as native <optgroup>s. When
+   * present they are rendered INSTEAD of `options` (the wheels page uses this
+   * for the unfiltered Model dropdown, grouped by brand).
+   */
+  optionGroups?: { label: string; options: { value: string; label: string }[] }[];
   placeholder?: string;
   min?: number;
   max?: number;
@@ -93,11 +99,21 @@ export function CatalogueFilters({ fields, values, onChange, onClearAll, activeC
               className="field-input cursor-pointer"
             >
               <option value="">All</option>
-              {field.options?.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
+              {field.optionGroups?.length
+                ? field.optionGroups.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.options.map((o) => (
+                        <option key={`${g.label}:${o.value}`} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))
+                : field.options?.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
             </select>
           )}
           {field.type === "text" && (
