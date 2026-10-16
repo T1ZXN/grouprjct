@@ -252,7 +252,7 @@ async function main() {
 # from netlify.toml on purpose — Netlify errors if the same rule is defined in
 # both places).
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
 `,
     "utf8"
   );

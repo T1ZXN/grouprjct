@@ -2,7 +2,7 @@
 # The site is statically prerendered by export-netlify.ts into dist-netlify/
 # (which is gitignored, so Netlify must build it here).
 [build]
-  command = "npm install -g bun@1.4.3 && bun install --frozen-lockfile && bun run build && bun ./export-netlify.ts"
+  command = "bun install --frozen-lockfile && bun run build && bun ./export-netlify.ts"
   publish = "dist-netlify"
 
 # No Supabase env is required: the site falls back to sample data when
@@ -15,7 +15,7 @@
 [functions]
   directory = "dist-netlify/netlify/functions"
 
-# Git-build path: pin Node so Netlify image updates cannot break the build
-# (mirrors the generated export toml, which pins NODE_VERSION=20 for zips).
+# TanStack Start requires Node >=22.12; pin Bun before dependency installation.
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
+  BUN_VERSION = "1.3.12"
