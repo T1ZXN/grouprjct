@@ -2,7 +2,7 @@
 # The site is statically prerendered by export-netlify.ts into dist-netlify/
 # (which is gitignored, so Netlify must build it here).
 [build]
-  command = "bun install && bun run build && bun ./export-netlify.ts"
+  command = "npm install -g bun@1.4.3 && bun install --frozen-lockfile && bun run build && bun ./export-netlify.ts"
   publish = "dist-netlify"
 
 # No Supabase env is required: the site falls back to sample data when
