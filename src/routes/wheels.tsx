@@ -10,7 +10,9 @@ import { formatGBP } from "~/lib/pricing";
 import {
   facetOptions,
   normaliseWheelBrand,
+  wheelCentreBore,
   wheelModelFromName,
+  wheelModelGroups,
   wheelOffsetEt,
 } from "~/lib/facets";
 import {
@@ -30,6 +32,8 @@ interface WheelsSearch {
   pcd?: string;
   /** Numeric offset (ET) — facet value of the stored "ET38"/"0" offset. */
   offset?: string;
+  /** Centre bore (CB) — the feed's own specs.feed.extra.centreBore value. */
+  centreBore?: string;
   colour?: string;
   finish?: string;
   /** Normalised brand ("Wolfrace"), not the feed's sub-brand string. */
@@ -48,6 +52,7 @@ const FILTER_KEYS = [
   "width",
   "pcd",
   "offset",
+  "centreBore",
   "colour",
   "finish",
   "brand",
@@ -67,6 +72,7 @@ export const Route = createFileRoute("/wheels")({
     width: toSearchString(search.width),
     pcd: toSearchString(search.pcd),
     offset: toSearchString(search.offset),
+    centreBore: toSearchString(search.centreBore),
     colour: toSearchString(search.colour),
     finish: toSearchString(search.finish),
     brand: toSearchString(search.brand),
@@ -119,14 +125,38 @@ function WheelsPage() {
     () => facetOptions(items.map((w) => normaliseWheelBrand(w.brand))),
     [items],
   );
-  const modelOptions = useMemo(
-    () => facetOptions(items.map((w) => wheelModelFromName(w.name, w.colour))),
-    [items],
-  );
   const offsetOptions = useMemo(
     () => facetOptions(items.map((w) => wheelOffsetEt(w.size.offset)), "numeric"),
     [items],
   );
+  // Centre bore (CB): only rows that actually carry the feed's centreBore
+  // (specs.feed.extra.centreBore — today the Wolfrace/ATS/Alutec feeds)
+  // surface values; rows without CB data contribute nothing (never invented,
+  // the same honesty rule as the Load facet). Values stay the feed's own
+  // strings, sorted numerically ("54.1" … "110").
+  const centreBoreOptions = useMemo(
+    () =>
+      facetOptions(
+        items.map((w) => wheelCentreBore(w.feedAttributes?.extra?.centreBore)),
+        "numeric",
+      ),
+    [items],
+  );
+  // Model dropdown scoped by Brand: with a brand selected it lists ONLY that
+  // brand's models; with no brand selected it groups every brand's models
+  // under native <optgroup> headings (mobile pickers render the group labels
+  // as section headers — clearer than one flat multi-brand model list).
+  // Option values are the bare model name either way, so the ?model= URL
+  // param and the filter comparison never drift.
+  const modelField = useMemo(() => {
+    if (search.brand) {
+      const scoped = items.filter((w) => normaliseWheelBrand(w.brand) === search.brand);
+      return {
+        options: facetOptions(scoped.map((w) => wheelModelFromName(w.name, w.colour))),
+      };
+    }
+    return { optionGroups: wheelModelGroups(items) };
+  }, [items, search.brand]);
   const colourOptions = useMemo(() => unique(items.map((w) => w.colour)), [items]);
   const finishOptions = useMemo(() => unique(items.map((w) => w.finish)), [items]);
 
@@ -139,6 +169,20 @@ function WheelsPage() {
         const next: WheelsSearch = { ...prev };
         if (value === undefined) delete next[key as keyof WheelsSearch];
         else (next as Record<string, string>)[key] = value;
+        // Changing the Brand re-scopes the Model dropdown: if the currently
+        // selected model is not in the new brand's list, drop it — otherwise
+        // a filter would stay active that the dropdown can no longer show or
+        // unset. Clearing the brand keeps the model (the grouped list holds
+        // every brand's models).
+        if (key === "brand" && value !== undefined && next.model) {
+          const models = new Set(
+            items
+              .filter((w) => normaliseWheelBrand(w.brand) === value)
+              .map((w) => wheelModelFromName(w.name, w.colour))
+              .filter((m) => m !== ""),
+          );
+          if (!models.has(next.model)) delete next.model;
+        }
         return next;
       },
     });
@@ -164,6 +208,11 @@ function WheelsPage() {
       if (search.width && w.size.width !== search.width) return false;
       if (search.pcd && w.size.pcd !== search.pcd) return false;
       if (search.offset && wheelOffsetEt(w.size.offset) !== search.offset) return false;
+      if (
+        search.centreBore &&
+        wheelCentreBore(w.feedAttributes?.extra?.centreBore) !== search.centreBore
+      )
+        return false;
       if (search.colour && w.colour !== search.colour) return false;
       if (search.finish && w.finish !== search.finish) return false;
       if (search.brand && normaliseWheelBrand(w.brand) !== search.brand) return false;
@@ -201,7 +250,7 @@ function WheelsPage() {
   return (
     <CataloguePage
       title="Alloy Wheels"
-      blurb="Performance alloy wheels in gloss, matte, satin and machined finishes. Filter by brand, model, size, PCD, offset (ET) and colour — every price is settings-driven from central pricing."
+      blurb="Performance alloy wheels in gloss, matte, satin and machined finishes. Filter by brand, model, size, PCD, offset (ET), centre bore (CB) and colour — every price is settings-driven from central pricing."
       fields={[
         { key: "q", label: "Search", type: "text", placeholder: "Search wheels…" },
         {
@@ -218,6 +267,12 @@ function WheelsPage() {
           type: "select",
           options: offsetOptions,
         },
+        {
+          key: "centreBore",
+          label: "Centre Bore (CB)",
+          type: "select",
+          options: centreBoreOptions,
+        },
         { key: "colour", label: "Colour", type: "select", options: colourOptions.map((v) => ({ value: v, label: v })) },
         { key: "finish", label: "Finish", type: "select", options: finishOptions.map((v) => ({ value: v, label: v })) },
         { key: "brand", label: "Brand", type: "select", options: brandOptions },
@@ -225,7 +280,7 @@ function WheelsPage() {
           key: "model",
           label: "Model",
           type: "select",
-          options: modelOptions,
+          ...modelField,
         },
         { key: "priceMin", label: "Min price (£)", type: "number", placeholder: "e.g. 150", min: 0 },
         { key: "priceMax", label: "Max price (£)", type: "number", placeholder: "e.g. 300", min: 0 },

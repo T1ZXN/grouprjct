@@ -31,12 +31,24 @@
  *      mapFeedRowToProduct, persisted with productToRow and read back with
  *      rowToProduct still facets correctly: re-imports cannot break these
  *      dropdowns.
+ *   6. CENTRE BORE (CB) — the feed's own centreBore column (carried verbatim
+ *      in specs.feed.extra.centreBore, mapped to feedAttributes.extra).
+ *      Values pass through exactly as published ("110", "84.1" — decimals are
+ *      never reformatted); rows without the column contribute nothing (never
+ *      invented); the round-trip keeps the column through map → persist →
+ *      read-back.
+ *   7. MODEL GROUPS — the unfiltered Model dropdown's brand→model grouping
+ *      (wheelModelGroups): every normalised brand becomes a group of that
+ *      brand's models (option values stay the bare model name), groups sort
+ *      alphabetically, and empty groups are never emitted.
  */
 import {
   facetOptions,
   normaliseWheelBrand,
   tyreLoadIndexValue,
+  wheelCentreBore,
   wheelModelFromName,
+  wheelModelGroups,
   wheelOffsetDisplay,
   wheelOffsetEt,
 } from "../src/lib/facets";
@@ -259,6 +271,138 @@ check(
   "the full imported set facets to exactly one Wolfrace brand option",
   JSON.stringify(facetOptions(roundTripped.map((p) => normaliseWheelBrand((p as Wheel).brand))).map((o) => o.value)) ===
     JSON.stringify(["Wolfrace"]),
+);
+/* ── 6. Centre bore (CB) ──────────────────────────────────────────────────── */
+console.log("centre bore — the feed's own value verbatim; missing = absent (never invented)");
+check("110 → 110", wheelCentreBore("110") === "110");
+check("84.1 keeps its decimal (never reformatted)", wheelCentreBore("84.1") === "84.1");
+check("70.1 → 70.1", wheelCentreBore("70.1") === "70.1");
+check("numeric column shape → the same string value", wheelCentreBore(72.6) === "72.6");
+check("surrounding whitespace is trimmed", wheelCentreBore(" 57.1 ") === "57.1");
+check(
+  "missing / null / blank → empty (the row contributes nothing)",
+  wheelCentreBore(undefined) === "" && wheelCentreBore(null) === "" && wheelCentreBore("") === "",
+);
+check(
+  "zero string passes through (a real, published value — not treated as missing)",
+  wheelCentreBore("0") === "0",
+);
+/** The 22 centre-bore values exactly as stored on the live wheel rows today. */
+const LIVE_DB_CENTRE_BORES = [
+  "110", "93.1", "89.1", "84.1", "78.1", "74.6", "74.1", "72.6", "71.1", "70.1", "67.1",
+  "66.6", "66.5", "66.1", "65.1", "64.2", "63.4", "63.3", "60.1", "57.1", "56.6", "54.1",
+];
+check(
+  "the 22 live centre-bore values facet to numeric order",
+  JSON.stringify(facetOptions(LIVE_DB_CENTRE_BORES, "numeric").map((o) => o.value)) ===
+    JSON.stringify([
+      "54.1", "56.6", "57.1", "60.1", "63.3", "63.4", "64.2", "65.1", "66.1", "66.5",
+      "66.6", "67.1", "70.1", "71.1", "72.6", "74.1", "74.6", "78.1", "84.1", "89.1",
+      "93.1", "110",
+    ]),
+);
+check(
+  "mapped rows facet the feed's centreBore column verbatim",
+  JSON.stringify(mapped.map((w) => wheelCentreBore(w.feedAttributes?.extra?.centreBore))) ===
+    JSON.stringify(["110", "110", "72.6", "70.1"]),
+);
+check(
+  "rows WITHOUT a centre bore contribute nothing to the facet",
+  facetOptions(
+    // two rows whose feed carries no centreBore column → wheelCentreBore ""
+    mapped.map((w) => wheelCentreBore(w.feedAttributes?.extra?.centreBore)).concat(["", ""]),
+    "numeric",
+  ).every((o) => o.value !== ""),
+);
+check(
+  "persisted + read-back rows keep the centre bore facet (re-imports cannot lose it)",
+  JSON.stringify(
+    roundTripped.map((p) => wheelCentreBore((p as Wheel).feedAttributes?.extra?.centreBore)),
+  ) === JSON.stringify(["110", "110", "72.6", "70.1"]),
+);
+/* ── 7. Model dropdown grouped by brand ───────────────────────────────────── */
+console.log("model groups — the unfiltered Model dropdown, grouped by brand");
+const GROUP_ROWS = [
+  { brand: "Wolfrace Eurosport", name: "Venom Gloss Raven Black", colour: "Gloss Raven Black" },
+  { brand: "Wolfrace 71", name: "Wolfsburg GTR Gloss Black", colour: "Gloss Black" },
+  { brand: "Forzza", name: "Grip G-9", colour: "Gloss Black" },
+  { brand: "ATS", name: "Antares", colour: "" },
+];
+check(
+  "groups are alphabetical by brand with each brand's own models",
+  JSON.stringify(wheelModelGroups(GROUP_ROWS)) ===
+    JSON.stringify([
+      { label: "ATS", options: [{ value: "Antares", label: "Antares" }] },
+      { label: "Forzza", options: [{ value: "Grip G-9", label: "Grip G-9" }] },
+      {
+        label: "Wolfrace",
+        options: [
+          { value: "Venom", label: "Venom" },
+          { value: "Wolfsburg GTR", label: "Wolfsburg GTR" },
+        ],
+      },
+    ]),
+);
+check(
+  "sub-brands collapse into ONE group (Wolfrace Eurosport + Wolfrace 71 + Wolfhart)",
+  wheelModelGroups([
+    { brand: "Wolfrace Eurosport", name: "Venom Gloss Raven Black", colour: "Gloss Raven Black" },
+    { brand: "Wolfhart Flowformed", name: "Genesis 2 Gloss Black Polished Face", colour: "Gloss Black Polished Face" },
+    { brand: "Wolfrace Explorer", name: "Sahara Matt Black Black Rivets", colour: "Matt Black Black Rivets" },
+  ]).length === 1 && wheelModelGroups([
+    { brand: "Wolfrace Eurosport", name: "Venom Gloss Raven Black", colour: "Gloss Raven Black" },
+    { brand: "Wolfhart Flowformed", name: "Genesis 2 Gloss Black Polished Face", colour: "Gloss Black Polished Face" },
+    { brand: "Wolfrace Explorer", name: "Sahara Matt Black Black Rivets", colour: "Matt Black Black Rivets" },
+  ])[0].label === "Wolfrace",
+);
+check(
+  "models de-duplicate within a brand (same design, several colours → one option)",
+  JSON.stringify(
+    wheelModelGroups([
+      { brand: "Wolfrace Eurosport", name: "Venom Gloss Raven Black", colour: "Gloss Raven Black" },
+      { brand: "Wolfrace Eurosport", name: "Venom Matt Black", colour: "Matt Black" },
+    ]),
+  ) === JSON.stringify([{ label: "Wolfrace", options: [{ value: "Venom", label: "Venom" }] }]),
+);
+check(
+  "the owner's named Wolfrace models all surface in the Wolfrace group",
+  (() => {
+    const rows = [
+      "Venom Gloss Raven Black|Gloss Raven Black",
+      "Wolfsburg GTR Gloss Black|Gloss Black",
+      "Genesis 2 Gloss Black Polished Face|Gloss Black Polished Face",
+      "Astorga Polar Silver|Polar Silver",
+      "Slotmag Matt Black|Matt Black",
+      "Sahara Matt Black Black Rivets|Matt Black Black Rivets",
+      "Munich 3 Gloss Black|Gloss Black",
+    ].map((s) => {
+      const [name, colour] = s.split("|");
+      return { brand: "Wolfrace Eurosport", name, colour };
+    });
+    const wolfrace = wheelModelGroups(rows).find((g) => g.label === "Wolfrace");
+    const values = wolfrace?.options.map((o) => o.value) ?? [];
+    return ["Venom", "Wolfsburg GTR", "Genesis 2", "Astorga", "Slotmag", "Sahara", "Munich 3"].every(
+      (m) => values.includes(m),
+    );
+  })(),
+);
+check(
+  "option values stay the bare model name (the ?model= param cannot drift)",
+  wheelModelGroups(GROUP_ROWS)
+    .flatMap((g) => g.options)
+    .every((o) => o.value === o.label),
+);
+check("no rows → no groups", JSON.stringify(wheelModelGroups([])) === "[]");
+check(
+  "a model with no brand groups under Other brands (nothing silently disappears)",
+  JSON.stringify(wheelModelGroups([{ brand: "", name: "Mystery Model", colour: "" }])) ===
+    JSON.stringify([
+      { label: "Other brands", options: [{ value: "Mystery Model", label: "Mystery Model" }] },
+    ]),
+);
+check(
+  "an empty model (blank name) never creates a group",
+  JSON.stringify(wheelModelGroups([{ brand: "Forzza", name: "", colour: "" }])) === "[]",
 );
 
 /* ── summary ──────────────────────────────────────────────────────────────── */
